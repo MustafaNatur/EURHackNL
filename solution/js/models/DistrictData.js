@@ -140,3 +140,56 @@ export const PUBLIC_PLACE_CATALOGUE = Object.freeze([
 export const SOCIAL_PLACES_KEYS = Object.freeze(
     PUBLIC_PLACE_CATALOGUE.filter(p => p.influence === 'reduces').map(p => p.key)
 );
+
+/**
+ * @typedef {Object} OutreachChannel
+ * @property {string} key        - Stable identifier (e.g. "adBanner")
+ * @property {string} label      - UI label (e.g. "Outdoor ad banners")
+ * @property {string} icon       - Single emoji used as a small visual cue
+ * @property {string} descr      - One-line description for the inventory tile
+ * @property {string} reachKind  - "high" | "targeted" | "trusted" | "digital"
+ *                                  Drives tile tone and is referenced by AI heuristics.
+ * @property {number} densityPer1000 - Expected count per 1,000 residents
+ * @property {number} count      - Concrete count present in the buurt
+ */
+
+/**
+ * Catalogue of outreach channels the municipality can use to reach
+ * residents in a specific buurt. Counts are derived deterministically
+ * per buurt by `scripts/build_database.py` (same pattern as
+ * `PUBLIC_PLACE_CATALOGUE`).
+ *
+ * `reachKind` groups channels by the kind of audience they reach best:
+ *   - "high":     mass-reach physical formats (banners, bus shelters,
+ *                  flyers, local press)
+ *   - "targeted": touchpoints frequented by specific cohorts (GP & pharmacy,
+ *                  schools, religious venues)
+ *   - "trusted":  human-to-human reach (door-to-door welzijn visits)
+ *   - "digital":  online / on-screen channels (community-centre screens,
+ *                  WhatsApp groups, supermarket community boards,
+ *                  library noticeboards)
+ *
+ * `densityPer1000` matches the realistic scaling for each format. The
+ * very high values (mailbox flyer, local press insert) represent reach
+ * per 1,000 residents — i.e. ~one drop per household.
+ */
+export const OUTREACH_CHANNEL_CATALOGUE = Object.freeze([
+    { key: 'adBanner',               label: 'Outdoor ad banners',          icon: '🪧', reachKind: 'high',     densityPer1000: 0.18, descr: 'JCDecaux/CS panels on main streets' },
+    { key: 'busShelterPoster',       label: 'Bus-shelter posters (Mupi)',  icon: '🚏', reachKind: 'high',     densityPer1000: 0.50, descr: 'Tram & bus stop poster slots' },
+    { key: 'mailboxFlyer',           label: 'Mailbox flyer drop',          icon: '📬', reachKind: 'high',     densityPer1000: 420,  descr: 'Household-level flyer distribution' },
+    { key: 'localPressInsert',       label: 'Local-press inserts',         icon: '📰', reachKind: 'high',     densityPer1000: 380,  descr: 'Maasstadweekblad weekly insert reach' },
+    { key: 'gpClinicPoster',         label: 'GP-clinic posters',           icon: '🩺', reachKind: 'targeted', densityPer1000: 0.14, descr: 'A3 posters in primary-care waiting rooms' },
+    { key: 'pharmacyPoster',         label: 'Pharmacy noticeboards',       icon: '💊', reachKind: 'targeted', densityPer1000: 0.12, descr: 'Apotheek bulletin boards' },
+    { key: 'libraryNoticeBoard',     label: 'Library bulletin boards',     icon: '📚', reachKind: 'digital',  densityPer1000: 0.10, descr: 'Pinboards inside the local library' },
+    { key: 'supermarketBoard',       label: 'Supermarket community board', icon: '🛒', reachKind: 'digital',  densityPer1000: 0.18, descr: 'A4 community slots at AH / Lidl / Jumbo' },
+    { key: 'schoolNewsletter',       label: 'School newsletters',          icon: '🎓', reachKind: 'targeted', densityPer1000: 0.22, descr: 'Inserts in primary-school weeklies' },
+    { key: 'religiousVenueBulletin', label: 'Religious-venue bulletins',   icon: '⛪', reachKind: 'targeted', densityPer1000: 0.20, descr: 'Sunday/Friday handouts at churches & mosques' },
+    { key: 'communityScreen',        label: 'Community-centre screens',    icon: '📺', reachKind: 'digital',  densityPer1000: 0.18, descr: 'Digital displays at community/senior centres' },
+    { key: 'neighborhoodWhatsApp',   label: 'Buurtapp groups',             icon: '💬', reachKind: 'digital',  densityPer1000: 1.10, descr: 'Active WhatsApp / Nextdoor groups' },
+    { key: 'doorToDoor',             label: 'Door-to-door welzijn visits', icon: '🚪', reachKind: 'trusted',  densityPer1000: 0.30, descr: 'Outreach workers, visits per week' }
+]);
+
+/** All outreach channel keys in the order declared in the catalogue. */
+export const OUTREACH_CHANNEL_KEYS = Object.freeze(
+    OUTREACH_CHANNEL_CATALOGUE.map(c => c.key)
+);

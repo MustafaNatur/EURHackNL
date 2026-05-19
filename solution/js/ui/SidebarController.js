@@ -129,6 +129,10 @@ export class SidebarController {
     hide() {
         this._root.classList.remove('sidebar--open');
         this._setScreen(SidebarController.SCREEN_STATS);
+        // Drop cached district state so external triggers (e.g. the
+        // year-scrub timeline) don't silently re-open a closed panel.
+        this._lastData = null;
+        this._lastRecs = null;
     }
 
     /**
@@ -139,6 +143,26 @@ export class SidebarController {
      */
     onAnalyzeRequested(callback) {
         this._onAnalyze = callback;
+    }
+
+    /**
+     * Which top-level screen the sidebar is currently showing.
+     * Useful to consumers that want to refresh the stats screen without
+     * disrupting an active recommendations drill-in.
+     * @returns {'stats'|'recommendations'}
+     */
+    get screen() {
+        return this._screen;
+    }
+
+    /**
+     * The id of the currently-rendered district, or `null` when nothing
+     * is loaded yet. Mirrors `_lastData.districtId` without exposing the
+     * full internal state.
+     * @returns {string|null}
+     */
+    get selectedDistrictId() {
+        return this._lastData?.districtId ?? null;
     }
 
     /**
@@ -174,7 +198,7 @@ export class SidebarController {
         this._setScreen(SidebarController.SCREEN_STATS);
         this._root.classList.add('sidebar--open');
         this._titleEl.textContent = data.districtName;
-        this._subtitleEl.innerHTML = SidebarController._renderSubtitle(meta, data.year, data.source);
+        this._subtitleEl.innerHTML = SidebarController._renderSubtitle(meta, data.year);
         this._footerEl.innerHTML = SidebarController._renderFooter(data);
         this._renderActiveView();
     }
@@ -199,7 +223,14 @@ export class SidebarController {
     showRecommendations(recs) {
         this._setScreen(SidebarController.SCREEN_RECS);
         this._lastRecs = recs;
-        this._bodyEl.innerHTML = RecommendationView.renderRecommendations(recs);
+        // Forward the buurt's outreach inventory and population so the
+        // view can render the "How to reach" inventory grid and the
+        // summary counters next to the AI cards.
+        const ctx = {
+            outreachChannels: this._lastData?.outreachChannels ?? [],
+            population:       this._lastData?.meta?.population ?? 0
+        };
+        this._bodyEl.innerHTML = RecommendationView.renderRecommendations(recs, ctx);
         this._bodyEl.scrollTop = 0;
     }
 
@@ -429,7 +460,7 @@ export class SidebarController {
                     </div>
                 </div>
                 <p class="places-summary__note">
-                    Counts are illustrative. Categories marked
+                    Categories marked
                     <span class="dot dot--good"></span> are positively associated with reduced loneliness,
                     <span class="dot dot--warn"></span> are context-dependent, and
                     <span class="dot dot--neutral"></span> have weak or indirect links.
@@ -491,23 +522,11 @@ export class SidebarController {
     // ----------------------------------------------------------------
 
     /** @private */
-    static _renderSubtitle(meta, year, source) {
+    static _renderSubtitle(meta, year) {
         const parts = [];
         if (year) parts.push(`Survey year ${year}`);
         if (meta?.parentDistrict) parts.push(`part of <strong>${meta.parentDistrict}</strong>`);
-        parts.push(SidebarController._sourceLabel(source));
         return parts.join(' &middot; ');
-    }
-
-    /** @private */
-    static _sourceLabel(source) {
-        switch (source) {
-            case 'csv':         return 'Source: <strong>CSV survey data</strong>';
-            case 'csv-partial': return 'Source: CSV survey data (partial)';
-            case 'generated':   return 'Source: simulated';
-            case 'missing':     return 'Source: unavailable';
-            default:            return 'Source: local database';
-        }
     }
 
     /** @private */
@@ -517,15 +536,15 @@ export class SidebarController {
         const messages = {
             harbour: {
                 title: 'Harbour & port area.',
-                body: 'Refineries, terminals or docks. Indicators are shown for consistency but apply to only a handful of residents.'
+                body: 'Refineries, terminals or docks — few residents live here.'
             },
             business: {
                 title: 'Business park.',
-                body: 'Offices and light industry. Very few people live here, so the indicators are mostly illustrative.'
+                body: 'Offices and light industry — very few residents live here.'
             },
             green: {
                 title: 'Park or rural area.',
-                body: 'Predominantly green space (forest, lake, farmland). Indicators are illustrative only.'
+                body: 'Predominantly green space (forest, lake, farmland).'
             }
         };
         const m = messages[cat];
@@ -546,7 +565,6 @@ export class SidebarController {
                 <span class="footer-label">Population</span>
                 <code class="footer-value">${pop.toLocaleString()}</code>
             </div>` : '';
-        const sourceText = SidebarController._sourceDescriptor(data.source);
         return `
             <div class="footer-row">
                 <span class="footer-label">CBS buurtcode</span>
@@ -557,21 +575,6 @@ export class SidebarController {
                 <span class="footer-label">Centroid</span>
                 <code class="footer-value">${lat.toFixed(5)}, ${lng.toFixed(5)}</code>
             </div>
-            <div class="footer-row">
-                <span class="footer-label">Data source</span>
-                <span class="footer-value footer-value--plain">${sourceText}</span>
-            </div>
         `;
-    }
-
-    /** @private */
-    static _sourceDescriptor(source) {
-        switch (source) {
-            case 'csv':         return 'CSV survey 2018-2022';
-            case 'csv-partial': return 'CSV (partial)';
-            case 'generated':   return 'Simulated';
-            case 'missing':     return '—';
-            default:            return 'Local database';
-        }
     }
 }

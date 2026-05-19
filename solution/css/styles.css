@@ -508,6 +508,91 @@ html, body {
     font-size: 10px !important;
 }
 
+/* ---------- City overview (above the legend) ---------- */
+.city-stats {
+    background: var(--surface);
+    border-radius: 10px;
+    box-shadow: var(--shadow-1);
+    border: 1px solid var(--border);
+    padding: 10px 12px 12px;
+    margin: 10px 0 0 10px !important;
+    font-size: 12px;
+    color: var(--text);
+    min-width: 215px;
+    max-width: 240px;
+}
+.city-stats__header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    margin-bottom: 8px;
+    padding-bottom: 8px;
+    border-bottom: 1px dashed var(--border);
+}
+.city-stats__eyebrow {
+    font-size: 10px;
+    letter-spacing: 0.10em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    font-weight: 600;
+}
+.city-stats__year {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text);
+    font-variant-numeric: tabular-nums;
+    background: var(--surface-2);
+    border-radius: 999px;
+    padding: 1px 8px;
+}
+.city-stats__list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.city-stats__row {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+.city-stats__row-top {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+}
+.city-stats__lbl {
+    font-size: 11.5px;
+    color: var(--text-muted);
+    line-height: 1.3;
+}
+.city-stats__num {
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--text);
+    letter-spacing: -0.01em;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.1;
+}
+.city-stats__num small {
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--text-muted);
+    margin-left: 1px;
+}
+.city-stats__delta {
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    font-variant-numeric: tabular-nums;
+}
+.city-stats__delta--good    { color: #15803d; }
+.city-stats__delta--bad     { color: #b91c1c; }
+.city-stats__delta--neutral { color: var(--text-muted); }
+
 /* ---------- Map legend ---------- */
 .legend {
     background: var(--surface);
@@ -1057,7 +1142,10 @@ html, body {
 .rec-card__facts {
     margin: 0;
     display: grid;
-    grid-template-columns: max-content 1fr;
+    /* `minmax(0, 1fr)` (instead of plain `1fr`) lets the value column
+       shrink below its content's natural width. Without it, long children
+       like the channel chips push the column wider than the gray block. */
+    grid-template-columns: max-content minmax(0, 1fr);
     column-gap: 14px;
     row-gap: 4px;
     padding: 8px 10px;
@@ -1080,6 +1168,7 @@ html, body {
     margin: 0;
     color: var(--text);
     line-height: 1.4;
+    min-width: 0;
 }
 
 /* ---------- Impact pill ---------- */
@@ -1204,6 +1293,249 @@ html, body {
     gap: 8px;
 }
 .rec-card__footer > .rec-impact { margin: 0; }
+
+/* ----------------------------------------------------------------
+   Top-level sections: "How to reach" + "How to connect"
+   ---------------------------------------------------------------- */
+.rec-section {
+    margin: 24px 0 4px;
+    padding-top: 18px;
+    border-top: 1px solid var(--border);
+}
+.rec-section:first-of-type {
+    border-top: none;
+    padding-top: 0;
+    margin-top: 0;
+}
+.rec-section__head {
+    margin: 0 0 14px;
+}
+.rec-section__title {
+    margin: 0 0 4px;
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--text);
+    letter-spacing: -0.01em;
+}
+.rec-section__subtitle {
+    margin: 0;
+    font-size: 12px;
+    line-height: 1.45;
+    color: var(--text-muted);
+}
+.rec-section__empty {
+    margin: 0;
+    padding: 12px 14px;
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--text-muted);
+    background: var(--surface-2);
+    border: 1px dashed var(--border);
+    border-radius: 10px;
+}
+/* Tone hint on the section title using a small leading bar. */
+.rec-section--reach .rec-section__title::before,
+.rec-section--connect .rec-section__title::before {
+    content: '';
+    display: inline-block;
+    width: 8px;
+    height: 14px;
+    margin-right: 8px;
+    vertical-align: -2px;
+    border-radius: 2px;
+    background: var(--accent);
+}
+.rec-section--connect .rec-section__title::before { background: var(--good, #22c55e); }
+
+/* ----------------------------------------------------------------
+   Outreach inventory grid (top of the "How to reach" section)
+   ---------------------------------------------------------------- */
+.outreach-inventory-wrap {
+    margin: 0 0 18px;
+    padding: 14px 14px 12px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+}
+.outreach-inventory__head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 10px;
+}
+.outreach-inventory__title {
+    margin: 0;
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    font-weight: 600;
+    color: var(--text-muted);
+}
+.outreach-inventory__meta {
+    font-size: 10.5px;
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+}
+.outreach-inventory {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 8px;
+}
+
+.outreach-tile {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 10px 12px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    transition: border-color 140ms ease, box-shadow 140ms ease, transform 140ms ease;
+}
+.outreach-tile:hover {
+    border-color: rgba(15, 23, 42, 0.18);
+    box-shadow: var(--shadow-1);
+    transform: translateY(-1px);
+}
+/* Head row: icon at the left, count at the right, optional "Suggested"
+   badge fills the gap between them. With `justify-content: space-between`
+   the badge and count never overlap, regardless of count width. */
+.outreach-tile__head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    min-width: 0;
+}
+.outreach-tile__icon {
+    font-size: 18px;
+    line-height: 1;
+    flex-shrink: 0;
+}
+.outreach-tile__count {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--text);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.01em;
+    margin-left: auto;
+    flex-shrink: 0;
+}
+.outreach-tile__body {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+.outreach-tile__label {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text);
+    line-height: 1.25;
+}
+.outreach-tile__descr {
+    font-size: 10.5px;
+    color: var(--text-muted);
+    line-height: 1.35;
+}
+/* "Suggested" pill — flows inline in the head row, sandwiched between
+   the icon and the count so the three never overlap. */
+.outreach-tile__suggested {
+    flex: 0 1 auto;
+    min-width: 0;
+    padding: 1px 7px;
+    font-size: 9.5px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: #1e3a8a;
+    background: rgba(59, 130, 246, 0.16);
+    border: 1px solid rgba(59, 130, 246, 0.28);
+    border-radius: 999px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    line-height: 1.4;
+}
+.outreach-tile--suggested {
+    border-color: rgba(59, 130, 246, 0.45);
+    background: linear-gradient(180deg, rgba(59, 130, 246, 0.06), var(--surface) 60%);
+    box-shadow: 0 1px 0 rgba(59, 130, 246, 0.10) inset;
+}
+.outreach-tile--suggested .outreach-tile__count {
+    color: #1e3a8a;
+}
+/* Tile-tone variants (left-edge stripe keyed off reachKind). */
+.outreach-tile::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 10px;
+    bottom: 10px;
+    width: 3px;
+    border-radius: 0 2px 2px 0;
+    background: var(--border);
+}
+.outreach-tile--high::before     { background: #f97316; }
+.outreach-tile--targeted::before { background: #3b82f6; }
+.outreach-tile--trusted::before  { background: #16a34a; }
+.outreach-tile--digital::before  { background: #8b5cf6; }
+
+/* ----------------------------------------------------------------
+   Channel chips (inside outreach cards' "Channels" fact row)
+   ---------------------------------------------------------------- */
+.rec-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    font-size: 11px;
+    color: var(--text);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    /* Each chip stays on its own line (no mid-label wrap) but is allowed
+       to ellipsise rather than overflow the surrounding gray block. */
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.5;
+}
+.rec-card__fact dd:has(.rec-chip) {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    min-width: 0;
+    max-width: 100%;
+}
+
+/* ----------------------------------------------------------------
+   4-up summary row (only used once outreach is present)
+   ---------------------------------------------------------------- */
+.rec-summary__row--four {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 10px;
+}
+.rec-summary__row--four .rec-summary__num {
+    font-size: 18px;
+}
+.rec-summary__row--four .rec-summary__num small {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-muted);
+    margin-left: 1px;
+}
+.rec-summary__row--four .rec-summary__lbl {
+    font-size: 10.5px;
+    line-height: 1.3;
+}
 
 /* ---------- "Host with Luma" button on event cards ---------- */
 .luma-host-btn {
@@ -1616,6 +1948,203 @@ body.luma-no-scroll { overflow: hidden; }
 }
 .luma-event__footnote strong { color: rgba(248, 250, 252, 0.7); }
 
+/* ===========================================================
+   Year timeline scrubber
+   Floats above the map (inside #map). Drives loneliness coloring
+   per year; auto-play loops through the year range.
+   =========================================================== */
+
+.timeline {
+    position: absolute;
+    left: 50%;
+    bottom: 28px;
+    transform: translateX(-50%);
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    width: min(560px, calc(100% - 32px));
+    min-width: 380px;
+    padding: 12px 16px 14px;
+    background: var(--surface);
+    border-radius: 16px;
+    box-shadow: var(--shadow-2);
+    border: 1px solid var(--border);
+    font-family: var(--font-stack);
+    transition: transform 320ms cubic-bezier(.2, .8, .2, 1);
+}
+
+/* When the right-hand sidebar is open the timeline shifts left so it
+   stays centred in the visible map area. Uses :has() so we don't have
+   to plumb extra state through JS. */
+.layout:has(.sidebar--open) .timeline {
+    transform: translateX(calc(-50% - (var(--sidebar-width) + 32px) / 2));
+}
+
+.timeline__play {
+    flex: 0 0 auto;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+    color: var(--accent);
+    font-size: 13px;
+    line-height: 1;
+    cursor: pointer;
+    display: grid;
+    place-items: center;
+    transition: background 160ms ease, color 160ms ease,
+                border-color 160ms ease, transform 140ms ease;
+}
+.timeline__play:hover {
+    background: var(--accent-soft);
+    border-color: var(--accent);
+}
+.timeline__play:active { transform: scale(0.96); }
+.timeline--playing .timeline__play {
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 4px var(--accent-soft);
+}
+.timeline__play-icon {
+    pointer-events: none;
+}
+
+.timeline__year-display {
+    flex: 0 0 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    min-width: 56px;
+}
+.timeline__eyebrow {
+    font-size: 10px;
+    letter-spacing: 0.10em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    font-weight: 600;
+}
+.timeline__year {
+    font-size: 24px;
+    font-weight: 700;
+    color: var(--text);
+    letter-spacing: -0.01em;
+    line-height: 1.1;
+    font-variant-numeric: tabular-nums;
+}
+
+.timeline__slider-wrap {
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 0;
+}
+
+/* Custom range slider — accent-coloured fill up to the current value,
+   neutral track beyond. Implemented with a CSS custom property `--fill`
+   set by TimelineController on each scrub. */
+.timeline__slider {
+    --fill: 100%;
+    -webkit-appearance: none;
+    appearance: none;
+    width: 100%;
+    height: 24px;
+    background: transparent;
+    cursor: pointer;
+    padding: 0;
+    margin: 0;
+    outline: none;
+}
+.timeline__slider:focus-visible::-webkit-slider-thumb {
+    box-shadow: 0 0 0 4px var(--accent-soft);
+}
+.timeline__slider:focus-visible::-moz-range-thumb {
+    box-shadow: 0 0 0 4px var(--accent-soft);
+}
+.timeline__slider::-webkit-slider-runnable-track {
+    height: 6px;
+    border-radius: 999px;
+    background: linear-gradient(
+        to right,
+        var(--accent) 0%,
+        var(--accent) var(--fill),
+        var(--surface-2) var(--fill),
+        var(--surface-2) 100%
+    );
+    border: 1px solid var(--border);
+}
+.timeline__slider::-moz-range-track {
+    height: 6px;
+    border-radius: 999px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+}
+.timeline__slider::-moz-range-progress {
+    height: 6px;
+    border-radius: 999px;
+    background: var(--accent);
+}
+.timeline__slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: var(--surface);
+    border: 2px solid var(--accent);
+    margin-top: -7px;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.18);
+    transition: transform 140ms ease, box-shadow 140ms ease;
+}
+.timeline__slider::-webkit-slider-thumb:hover {
+    transform: scale(1.08);
+    box-shadow: 0 2px 6px rgba(15, 23, 42, 0.22);
+}
+.timeline__slider::-moz-range-thumb {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: var(--surface);
+    border: 2px solid var(--accent);
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.18);
+    transition: transform 140ms ease, box-shadow 140ms ease;
+}
+.timeline__slider::-moz-range-thumb:hover {
+    transform: scale(1.08);
+    box-shadow: 0 2px 6px rgba(15, 23, 42, 0.22);
+}
+
+/* Year tick labels: evenly distributed under the slider. */
+.timeline__ticks {
+    list-style: none;
+    margin: 0;
+    padding: 0 6px;
+    display: flex;
+    justify-content: space-between;
+    font-size: 10.5px;
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.02em;
+}
+.timeline__ticks li {
+    position: relative;
+    text-align: center;
+    line-height: 1.2;
+}
+.timeline__ticks li::before {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: -7px;
+    width: 1px;
+    height: 4px;
+    background: var(--border);
+    transform: translateX(-50%);
+}
+
 /* ---------- Responsive ---------- */
 @media (max-width: 720px) {
     :root { --sidebar-width: 92vw; }
@@ -1644,4 +2173,15 @@ body.luma-no-scroll { overflow: hidden; }
 
     .rec-card__footer { gap: 10px; }
     .luma-host-btn { margin-left: 0; }
+
+    .timeline {
+        width: 92vw;
+        min-width: 0;
+        bottom: 16px;
+        gap: 12px;
+        padding: 10px 12px 12px;
+    }
+    .timeline__year { font-size: 18px; }
+    .timeline__year-display { min-width: 44px; }
+    .timeline__play { width: 36px; height: 36px; }
 }

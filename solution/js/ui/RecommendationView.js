@@ -1,9 +1,11 @@
 import {
     METRIC_CATALOGUE,
-    PUBLIC_PLACE_CATALOGUE
+    PUBLIC_PLACE_CATALOGUE,
+    OUTREACH_CHANNEL_CATALOGUE
 } from '../models/DistrictData.js';
 import {
     RECOMMENDATION_KINDS,
+    RECOMMENDATION_SECTIONS,
     AI_STAGES
 } from '../models/RecommendationData.js';
 
@@ -83,35 +85,90 @@ export class RecommendationView {
 
     /**
      * @param {import('../models/RecommendationData.js').Recommendation[]} recs
+     * @param {{ outreachChannels?: {key:string,count:number}[], population?: number }} [ctx]
      */
-    static renderRecommendations(recs) {
-        if (!recs || recs.length === 0) {
-            return `
-                <section class="rec-empty">
-                    <h3 class="rec-empty__title">No interventions suggested</h3>
-                    <p class="rec-empty__body">
-                        This buurt's indicators are within healthy ranges.
-                    </p>
-                </section>
-            `;
-        }
+    static renderRecommendations(recs, ctx = {}) {
+        const channels  = Array.isArray(ctx.outreachChannels) ? ctx.outreachChannels : [];
+        const population = Number(ctx.population) || 0;
+        const safeRecs = Array.isArray(recs) ? recs : [];
 
         // Decorate each recommendation with its index in the original
         // list so the host (SidebarController) can find it back from
         // a button click via data attribute, even after we group.
-        const indexed = recs.map((rec, i) => ({ rec, index: i }));
-        const groups = RecommendationView._groupByKind(indexed);
-        const summary = RecommendationView._renderSummary(recs);
+        const indexed = safeRecs.map((rec, i) => ({ rec, index: i }));
+        const bySection = RecommendationView._groupBySection(indexed);
 
-        const sections = groups.map(({ kind, items }) => {
+        const summary = RecommendationView._renderSummary(safeRecs, channels);
+
+        // Determine which channels the outreach cards actually reference
+        // so the inventory tiles can highlight them as "Suggested".
+        const suggestedChannelSet = new Set();
+        for (const { rec } of indexed) {
+            if (rec.kind === 'outreach' && Array.isArray(rec.channels)) {
+                for (const k of rec.channels) suggestedChannelSet.add(k);
+            }
+        }
+
+        const sectionOrder = Object.entries(RECOMMENDATION_SECTIONS)
+            .sort((a, b) => a[1].order - b[1].order)
+            .map(([key]) => key);
+
+        const sections = sectionOrder.map(sectionKey => {
+            const sectionMeta = RECOMMENDATION_SECTIONS[sectionKey];
+            const sectionItems = bySection.get(sectionKey) ?? [];
+
+            const sectionHeader = `
+                <header class="rec-section__head">
+                    <h3 class="rec-section__title">${sectionMeta.title}</h3>
+                    <p class="rec-section__subtitle">${sectionMeta.subtitle}</p>
+                </header>
+            `;
+
+            let body;
+            if (sectionKey === 'reach') {
+                const inventory = RecommendationView._renderOutreachInventory(channels, suggestedChannelSet, population);
+                const cards = RecommendationView._renderKindGroups(sectionItems);
+                const emptyNote = sectionItems.length === 0
+                    ? `<p class="rec-section__empty">No specific campaigns triggered — start with one of the channels above as a broad-base push.</p>`
+                    : '';
+                body = `${inventory}${cards}${emptyNote}`;
+            } else {
+                const cards = RecommendationView._renderKindGroups(sectionItems);
+                const emptyNote = sectionItems.length === 0
+                    ? `<p class="rec-section__empty">This buurt's connect indicators are within healthy ranges — no programme changes proposed.</p>`
+                    : '';
+                body = `${cards}${emptyNote}`;
+            }
+
+            return `
+                <section class="rec-section rec-section--${sectionKey}">
+                    ${sectionHeader}
+                    ${body}
+                </section>
+            `;
+        }).join('');
+
+        return `${summary}${sections}`;
+    }
+
+    /**
+     * Renders all "by-kind" sub-groups of recommendations that belong to
+     * one parent section (reach or connect).
+     * @private
+     * @param {{rec: import('../models/RecommendationData.js').Recommendation, index: number}[]} sectionItems
+     */
+    static _renderKindGroups(sectionItems) {
+        if (!sectionItems || sectionItems.length === 0) return '';
+        const groups = RecommendationView._groupByKind(sectionItems);
+        return groups.map(({ kind, items }) => {
             const meta = RECOMMENDATION_KINDS[kind];
             return `
                 <section class="rec-group">
-                    <h3 class="rec-group__title">
+                    <h4 class="rec-group__title">
                         <span class="rec-group__icon" aria-hidden="true">${meta.icon}</span>
                         ${meta.label}
                         <span class="rec-group__count">${items.length}</span>
-                    </h3>
+                    </h4>
                     <ul class="rec-list">
                         ${items.map(({ rec, index }) =>
                             RecommendationView.renderEntityCard(rec, index)
@@ -120,8 +177,64 @@ export class RecommendationView {
                 </section>
             `;
         }).join('');
+    }
 
-        return `${summary}${sections}`;
+    // ----------------------------------------------------------------
+    //  Outreach inventory grid
+    // ----------------------------------------------------------------
+
+    /**
+     * Renders the full outreach-channel inventory as a responsive grid
+     * of tiles. Tiles that match a channel referenced by any outreach
+     * card carry a small "Suggested" badge.
+     *
+     * @private
+     * @param {{key:string,count:number}[]} channels
+     * @param {Set<string>} suggestedKeys
+     * @param {number} population
+     */
+    static _renderOutreachInventory(channels, suggestedKeys, population) {
+        if (!Array.isArray(channels) || channels.length === 0) return '';
+
+        const countsByKey = new Map(channels.map(c => [c.key, Number(c.count) || 0]));
+
+        const tiles = OUTREACH_CHANNEL_CATALOGUE.map(def => {
+            const count = countsByKey.get(def.key) ?? 0;
+            const suggested = suggestedKeys.has(def.key);
+            const formattedCount = RecommendationView._formatCompactCount(count);
+            const suggestedBadge = suggested
+                ? `<span class="outreach-tile__suggested" title="Featured in an outreach campaign below">Suggested</span>`
+                : '';
+            return `
+                <li class="outreach-tile outreach-tile--${def.reachKind}${suggested ? ' outreach-tile--suggested' : ''}">
+                    <div class="outreach-tile__head">
+                        <span class="outreach-tile__icon" aria-hidden="true">${def.icon}</span>
+                        ${suggestedBadge}
+                        <span class="outreach-tile__count">${formattedCount}</span>
+                    </div>
+                    <div class="outreach-tile__body">
+                        <span class="outreach-tile__label">${def.label}</span>
+                        <span class="outreach-tile__descr">${def.descr}</span>
+                    </div>
+                </li>
+            `;
+        }).join('');
+
+        const populationHint = population > 0
+            ? `<span class="outreach-inventory__meta">Reach scaled to ~${RecommendationView._formatCompactCount(population)} residents</span>`
+            : '';
+
+        return `
+            <section class="outreach-inventory-wrap">
+                <header class="outreach-inventory__head">
+                    <h4 class="outreach-inventory__title">Channels available in this buurt</h4>
+                    ${populationHint}
+                </header>
+                <ul class="outreach-inventory">
+                    ${tiles}
+                </ul>
+            </section>
+        `;
     }
 
     /**
@@ -201,14 +314,47 @@ export class RecommendationView {
             );
     }
 
-    /** @private */
-    static _renderSummary(recs) {
+    /**
+     * Groups indexed recommendations by their parent section
+     * ("reach" / "connect"), based on the `section` field declared in
+     * RECOMMENDATION_KINDS for each kind.
+     * @private
+     * @param {{rec: import('../models/RecommendationData.js').Recommendation, index: number}[]} indexed
+     * @returns {Map<string, {rec: import('../models/RecommendationData.js').Recommendation, index: number}[]>}
+     */
+    static _groupBySection(indexed) {
+        const bySection = new Map();
+        for (const pair of indexed) {
+            const sectionKey = RECOMMENDATION_KINDS[pair.rec.kind]?.section ?? 'connect';
+            if (!bySection.has(sectionKey)) bySection.set(sectionKey, []);
+            bySection.get(sectionKey).push(pair);
+        }
+        return bySection;
+    }
+
+    /**
+     * Renders the small at-a-glance KPI strip at the top of the
+     * recommendations screen. With outreach in the mix we now show four
+     * counters: total interventions, high-priority, reach channels used,
+     * and total weekly reach across the outreach campaigns.
+     * @private
+     */
+    static _renderSummary(recs, channels) {
         const total = recs.length;
         const highCount = recs.filter(r => r.priority === 'high').length;
-        const kinds = new Set(recs.map(r => r.kind)).size;
+        const outreachRecs = recs.filter(r => r.kind === 'outreach');
+        const usedChannels = new Set();
+        let totalReach = 0;
+        for (const r of outreachRecs) {
+            if (Array.isArray(r.channels)) {
+                for (const k of r.channels) usedChannels.add(k);
+            }
+            if (Number.isFinite(r.expectedReach)) totalReach += r.expectedReach;
+        }
+        const inventorySize = Array.isArray(channels) ? channels.length : 0;
         return `
             <section class="rec-summary">
-                <div class="rec-summary__row">
+                <div class="rec-summary__row rec-summary__row--four">
                     <div class="rec-summary__stat">
                         <span class="rec-summary__num">${total}</span>
                         <span class="rec-summary__lbl">Proposed interventions</span>
@@ -218,17 +364,31 @@ export class RecommendationView {
                         <span class="rec-summary__lbl">High priority</span>
                     </div>
                     <div class="rec-summary__stat">
-                        <span class="rec-summary__num">${kinds}</span>
-                        <span class="rec-summary__lbl">Action types</span>
+                        <span class="rec-summary__num">${usedChannels.size}<small>/${inventorySize}</small></span>
+                        <span class="rec-summary__lbl">Reach channels used</span>
+                    </div>
+                    <div class="rec-summary__stat">
+                        <span class="rec-summary__num">${RecommendationView._formatCompactCount(totalReach)}</span>
+                        <span class="rec-summary__lbl">Est. weekly reach</span>
                     </div>
                 </div>
                 <p class="rec-summary__note">
-                    Generated by AI from the buurt's indicators and public-place
-                    inventory. Each card maps to an entity the municipality can
-                    plan, fund or remove.
+                    Generated by AI from the buurt's indicators, public-place
+                    inventory, and outreach-channel availability. Each card maps
+                    to an entity the municipality can plan, fund, or remove.
                 </p>
             </section>
         `;
+    }
+
+    /** @private */
+    static _formatCompactCount(n) {
+        const v = Number(n) || 0;
+        const abs = Math.abs(v);
+        if (abs >= 1_000_000) return `${(v / 1_000_000).toFixed(2)}M`;
+        if (abs >= 10_000)    return `${Math.round(v / 1_000)}k`;
+        if (abs >= 1_000)     return `${(v / 1_000).toFixed(1)}k`;
+        return Math.round(v).toLocaleString();
     }
 
     /** @private */
@@ -278,7 +438,8 @@ export class RecommendationView {
     /**
      * Renders the small key/value strip under the rationale, with
      * kind-specific facts (audience+venue for events, action+place for
-     * places, target for reductions, department for policies).
+     * places, target for reductions, department for policies,
+     * channels+reach for outreach).
      * @private
      */
     static _renderFacts(rec) {
@@ -296,6 +457,13 @@ export class RecommendationView {
             if (rec.targetLabel) rows.push(['Target',    rec.targetLabel]);
         } else if (rec.kind === 'policy') {
             if (rec.department)  rows.push(['Department', rec.department]);
+        } else if (rec.kind === 'outreach') {
+            if (rec.audience)   rows.push(['Audience', rec.audience]);
+            const chips = RecommendationView._channelChips(rec.channels);
+            if (chips)          rows.push(['Channels', chips]);
+            if (Number.isFinite(rec.expectedReach)) {
+                rows.push(['Est. weekly reach', RecommendationView._formatCompactCount(rec.expectedReach)]);
+            }
         }
         if (rows.length === 0) return '';
         return `
@@ -315,6 +483,21 @@ export class RecommendationView {
         if (!placeKey) return null;
         const def = PUBLIC_PLACE_CATALOGUE.find(p => p.key === placeKey);
         return def ? `${def.icon} ${def.label}` : placeKey;
+    }
+
+    /**
+     * Render the chosen outreach channels as a row of small chips
+     * (icon + label) so a card visibly cites which channels it would mix.
+     * @private
+     */
+    static _channelChips(channelKeys) {
+        if (!Array.isArray(channelKeys) || channelKeys.length === 0) return null;
+        return channelKeys.map(key => {
+            const def = OUTREACH_CHANNEL_CATALOGUE.find(c => c.key === key);
+            const icon = def?.icon ?? '·';
+            const label = def?.label ?? key;
+            return `<span class="rec-chip">${icon} ${label}</span>`;
+        }).join('');
     }
 
     /** @private */

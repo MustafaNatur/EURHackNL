@@ -1,4 +1,5 @@
 import { AppConfig } from '../config.js';
+import { CityStatsControl } from '../ui/CityStatsControl.js';
 
 /**
  * MapController
@@ -69,6 +70,8 @@ export class MapController {
         this._colorMode = 'loneliness';
         /** @type {LegendControl|null} */
         this._legend = null;
+        /** @type {CityStatsControl|null} */
+        this._cityStats = null;
     }
 
     /**
@@ -93,13 +96,23 @@ export class MapController {
 
         this._map.addControl(new gl.NavigationControl({ showCompass: false }), 'top-left');
         this._map.addControl(new gl.ScaleControl({ unit: 'metric' }), 'bottom-left');
+
+        await this._geoService.load();
+
+        // Order in the top-left stack (top to bottom):
+        //   1. Navigation control (added above)
+        //   2. City stats overview (added here, before legend so it appears above it)
+        //   3. Legend with loneliness/type toggle (added below)
+        this._cityStats = new CityStatsControl({
+            fc: this._geoService.getFeatureCollection()
+        });
+        this._map.addControl(this._cityStats, 'top-left');
+
         this._legend = new LegendControl(
             this._colorMode,
             (mode) => this.setColorMode(mode)
         );
         this._map.addControl(this._legend, 'top-left');
-
-        await this._geoService.load();
 
         await new Promise(resolve => {
             if (this._map.loaded()) resolve();
@@ -197,6 +210,29 @@ export class MapController {
         if (!feature) return;
         this._applySelection(districtId);
         this._notifySelection(feature);
+    }
+
+    /**
+     * Re-publish the district FeatureCollection to MapLibre. Use this
+     * after mutating feature properties (e.g. swapping `lonelinessScore`
+     * for a different year) so the existing paint expressions re-evaluate
+     * against the updated data.
+     */
+    refreshDistrictSource() {
+        const src = this._map?.getSource(MapController.SOURCE_ID);
+        if (!src) return;
+        const fc = this._geoService.getFeatureCollection();
+        src.setData(fc);
+    }
+
+    /**
+     * Recompute and re-render the top-left "Rotterdam overview" panel
+     * for the given year. Cheap (a single pass over the FeatureCollection)
+     * so it's safe to call on every slider tick.
+     * @param {number} year
+     */
+    updateCityStats(year) {
+        this._cityStats?.update(year);
     }
 
     /** @private */

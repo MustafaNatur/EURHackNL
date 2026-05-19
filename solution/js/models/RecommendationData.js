@@ -18,8 +18,9 @@
  * single source of truth without the AI having to inline strings.
  */
 
-/** @typedef {'event'|'place'|'reduction'|'policy'} RecommendationKind */
+/** @typedef {'event'|'place'|'reduction'|'policy'|'outreach'} RecommendationKind */
 /** @typedef {'high'|'medium'|'low'} RecommendationPriority */
+/** @typedef {'reach'|'connect'} RecommendationSection */
 
 /**
  * @typedef {{ metric: string, delta: number } | { qualitative: string }} ExpectedImpact
@@ -74,26 +75,65 @@
  */
 
 /**
- * @typedef {EventRecommendation
- *         | PlaceRecommendation
- *         | ReductionRecommendation
- *         | PolicyRecommendation} Recommendation
+ * @typedef {BaseRecommendation & {
+ *   kind: 'outreach',
+ *   channels: string[],
+ *   audience: string,
+ *   expectedReach: number
+ * }} OutreachRecommendation
+ *
+ * Outreach campaign card — proposes a combination of `channels` (keys
+ * from `OUTREACH_CHANNEL_CATALOGUE`) tailored to a specific audience,
+ * with a deterministic estimate of total residents reached.
  */
 
 /**
- * Ordered presentation metadata for the four recommendation kinds.
- * `order` controls the section order in the rendered output; `icon`,
- * `label` and `tone` are consumed by RecommendationView when building
- * cards and section headers.
+ * @typedef {EventRecommendation
+ *         | PlaceRecommendation
+ *         | ReductionRecommendation
+ *         | PolicyRecommendation
+ *         | OutreachRecommendation} Recommendation
+ */
+
+/**
+ * Top-level sections that group recommendation kinds on screen.
  *
- * `tone` maps to existing CSS tokens (--accent / --good / --warn / --bad)
- * so the recommendation panel reuses the same palette as the stats view.
+ *   - "reach"   : how to get the message in front of residents
+ *                  (outreach campaigns + the channel inventory)
+ *   - "connect" : how to actually reduce loneliness once people
+ *                  show up (events, places, reductions, policies)
+ *
+ * `order` controls the on-screen order of the sections.
+ */
+export const RECOMMENDATION_SECTIONS = Object.freeze({
+    reach: {
+        order: 0,
+        title: 'How to reach',
+        subtitle: 'Channels to get the message in front of the right residents'
+    },
+    connect: {
+        order: 1,
+        title: 'How to connect',
+        subtitle: 'Programmes, places, and policies that close the loneliness gap'
+    }
+});
+
+/**
+ * Ordered presentation metadata for every recommendation kind.
+ *
+ *   - `section` : key in RECOMMENDATION_SECTIONS this kind belongs to
+ *   - `order`   : sort order *within* its section
+ *   - `icon`, `label` : displayed on card headers and section sub-headings
+ *   - `tone`    : maps to existing CSS tokens (--accent / --good / --warn
+ *                  / --bad) so the recommendation panel reuses the same
+ *                  palette as the stats view.
  */
 export const RECOMMENDATION_KINDS = Object.freeze({
-    event:     { order: 0, label: 'Event',          icon: '🎉', tone: 'accent' },
-    place:     { order: 1, label: 'Public place',   icon: '🏛',  tone: 'good'   },
-    reduction: { order: 2, label: 'Reduce / remove', icon: '🚫', tone: 'bad'    },
-    policy:    { order: 3, label: 'Policy action',  icon: '📋', tone: 'warn'   }
+    outreach:  { section: 'reach',   order: 0, label: 'Outreach campaign', icon: '📣', tone: 'accent' },
+    event:     { section: 'connect', order: 0, label: 'Event',             icon: '🎉', tone: 'accent' },
+    place:     { section: 'connect', order: 1, label: 'Public place',      icon: '🏛', tone: 'good'   },
+    reduction: { section: 'connect', order: 2, label: 'Reduce / remove',   icon: '🚫', tone: 'bad'    },
+    policy:    { section: 'connect', order: 3, label: 'Policy action',     icon: '📋', tone: 'warn'   }
 });
 
 /** Human-readable labels for the three AI processing stages. */
