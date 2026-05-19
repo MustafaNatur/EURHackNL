@@ -85,6 +85,72 @@ export class AIService {
         return AIService._compose(districtData);
     }
 
+    /**
+     * Evaluate one event record against the buurt's current metrics.
+     *
+     * Returns a structured feedback object the UI can render directly:
+     *
+     *   {
+     *     effectivenessScore:     number in [0, 100],
+     *     effectivenessRationale: string,
+     *     gaps:        string[],   // 1–3 bullets — what the event likely WON'T address
+     *     suggestions: string[],   // 1–3 bullets — incremental improvements
+     *     reachAssessment: { reachedRatio?: number, label: string, tone: 'good'|'warn'|'bad' }
+     *   }
+     *
+     * Determinism: identical (eventId × districtId) inputs always
+     * produce the same output, so re-running "Regenerate" without any
+     * other change gives stable text — exactly how a real LLM with a
+     * fixed seed would behave. The rule-based body is the Phase-5
+     * fallback when no Claude API is reachable.
+     *
+     * @param {import('../models/EventRecord.js').EventRecord} eventRecord
+     * @param {import('../models/DistrictData.js').DistrictData & { meta?: any }} districtData
+     * @param {{ onStage?: (stage: string) => void, skipDelay?: boolean }} [opts]
+     */
+    async evaluateEvent(eventRecord, districtData, opts = {}) {
+        const onStage = typeof opts.onStage === 'function' ? opts.onStage : () => {};
+        if (!opts.skipDelay) {
+            for (const stage of AI_STAGES) {
+                onStage(stage.id);
+                await this._delay();
+            }
+        }
+        return AIService._composeEventFeedback(eventRecord, districtData);
+    }
+
+    /**
+     * Generate cross-buurt recommendations for a demographic segment.
+     *
+     * Builds a synthetic "average buurt" from the segment's filter applied
+     * to the top-N highest-risk buurten, then runs the same `_compose`
+     * pipeline used by `generate()`. Result is a `Recommendation[]`
+     * suitable for the audience-first view.
+     *
+     * @param {import('../models/PopulationSegment.js').PopulationSegment} segment
+     * @param {{ districtId: string, districtName: string, metrics: Object<string, number> }[]} buurtenData
+     * @param {{ skipDelay?: boolean, onStage?: (stage: string) => void }} [opts]
+     */
+    async generateForSegment(segment, buurtenData, opts = {}) {
+        const onStage = typeof opts.onStage === 'function' ? opts.onStage : () => {};
+        if (!opts.skipDelay) {
+            for (const stage of AI_STAGES) {
+                onStage(stage.id);
+                await this._delay();
+            }
+        }
+        const averaged = AIService._averageBuurtenMetrics(buurtenData);
+        const syntheticDistrict = {
+            districtId:   `segment-${segment.id}`,
+            districtName: segment.name,
+            metrics:      averaged,
+            publicPlaces:    [],
+            outreachChannels: [],
+            meta: { category: 'residential', population: 0 }
+        };
+        return AIService._compose(syntheticDistrict);
+    }
+
     /** @private */
     _delay() {
         const ms = this._stageMinMs + Math.random() * (this._stageMaxMs - this._stageMinMs);
@@ -94,6 +160,252 @@ export class AIService {
     // ----------------------------------------------------------------
     //  Synthesis
     // ----------------------------------------------------------------
+
+    /**
+     * Build the structured AI feedback object for a single event. Pure;
+     * given the same inputs it always yields the same text.
+     *
+     * Heuristics, in plain language:
+     *   1. Effectiveness reflects how well the event's "shape" matches
+     *      the buurt's loneliness pattern (severe-skewed vs social-skewed),
+     *      compounded by the marketing-mix fit and the reached-vs-targeted
+     *      ratio when the event is `completed`.
+     *   2. Gaps call out at least one loneliness sub-type the event is
+     *      structurally unlikely to address (e.g. a "youth pickup football"
+     *      event won't help with severe loneliness in 65+ residents).
+     *   3. Suggestions are 1–3 concrete, small improvements — never the
+     *      same suggestion twice, ordered by expected impact.
+     *
+     * @private
+     */
+    static _composeEventFeedback(eventRecord, districtData) {
+        const metrics = districtData?.metrics ?? {};
+        const meta    = districtData?.meta    ?? {};
+
+        const lonely   = metrics.lonely               ?? 0;
+        const sev      = metrics.severelyLonely       ?? 0;
+        const emo      = metrics.emotionallyLonely    ?? 0;
+        const soc      = metrics.sociallyLonely       ?? 0;
+        const support  = metrics.receivesSupportFromOthers   ?? 0;
+        const anxiety  = metrics.highRiskAnxietyOrDepression ?? 0;
+
+        const channels   = Array.isArray(eventRecord?.marketingMethods)
+            ? eventRecord.marketingMethods.map(m => m.channel).filter(Boolean)
+            : [];
+        const audience   = (eventRecord?.audience ?? '').toLowerCase();
+        const recurrence = (eventRecord?.recurrence ?? '').toLowerCase();
+        const status     = eventRecord?.status;
+        const targeted   = Number(eventRecord?.populationTargeted) || 0;
+        const reached    = Number(eventRecord?.populationReached)  || 0;
+
+        // Audience shape → which loneliness sub-types it MOST plausibly
+        // addresses. Order in the tuple matters: first = primary target.
+        const audienceShape = AIService._classifyAudience(audience);
+
+        // ---------------- Effectiveness score ----------------
+        let score = 50;
+        const positives = [];
+        const negatives = [];
+
+        // Reach (only if completed)
+        let reachedRatio = null;
+        if (status === 'completed' && targeted > 0) {
+            reachedRatio = reached / targeted;
+            if (reachedRatio >= 1.1)      { score += 22; positives.push(`exceeded its reach target (${(reachedRatio*100).toFixed(0)}% of plan)`); }
+            else if (reachedRatio >= 0.9) { score += 14; positives.push(`hit its reach target (${(reachedRatio*100).toFixed(0)}% of plan)`); }
+            else if (reachedRatio >= 0.5) { score += 4;  positives.push(`reached ${(reachedRatio*100).toFixed(0)}% of the plan`); }
+            else                          { score -= 18; negatives.push(`only reached ${(reachedRatio*100).toFixed(0)}% of the plan`); }
+        }
+
+        // Audience–buurt fit
+        const dominant = AIService._dominantLoneliness({ sev, emo, soc });
+        if (audienceShape.primary === dominant)       { score += 14; positives.push(`audience matches the buurt's dominant signal (${dominant} loneliness)`); }
+        else if (audienceShape.secondary === dominant){ score += 6;  positives.push(`audience partially matches the buurt's dominant signal (${dominant})`); }
+        else                                          { score -= 6;  negatives.push(`audience is a poor match for the buurt's dominant signal (${dominant} loneliness)`); }
+
+        // Marketing mix fit
+        const mixFit = AIService._channelMixFit(channels, audienceShape);
+        if (mixFit >= 0.75)      { score += 12; positives.push('marketing mix matches the audience cohort'); }
+        else if (mixFit >= 0.5)  { score += 4;  positives.push('marketing mix is plausible for the audience'); }
+        else if (mixFit > 0)     { score -= 6;  negatives.push('marketing mix only partially fits the audience'); }
+        else                     { score -= 10; negatives.push('no marketing mix recorded; reach is likely to under-deliver'); }
+
+        // Cadence
+        if (/weekly|bi-?weekly/.test(recurrence))       score += 4;
+        else if (/monthly/.test(recurrence))            score += 1;
+        else if (/annual|one-?off|once/.test(recurrence)) { score -= 3; negatives.push('one-off cadence struggles to convert weak ties to lasting support'); }
+
+        // Buurt severity tail-wind
+        if (lonely >= 50)        score += 5;
+        else if (lonely >= 38)   score += 2;
+
+        score = Math.max(5, Math.min(95, Math.round(score)));
+
+        const effectivenessRationale = positives.length > 0
+            ? `Likely impact: ${positives.slice(0, 3).join('; ')}${negatives.length ? `. However, ${negatives[0]}` : ''}.`
+            : `${negatives[0] ?? 'No clear positive signal'}; expected impact is limited.`;
+
+        // ---------------- Gaps ----------------
+        const gaps = [];
+        if (audienceShape.primary !== 'severe' && sev >= 12) {
+            gaps.push(`Severe loneliness (${sev.toFixed(1)}%) is high here, but this event is not designed for housebound or 65+ residents.`);
+        }
+        if (audienceShape.primary !== 'emotional' && emo >= 28) {
+            gaps.push(`Emotional loneliness (${emo.toFixed(1)}%) typically needs depth-of-tie formats (peer support, story-sharing) — this event is more contact-focused.`);
+        }
+        if (audienceShape.primary !== 'social' && soc >= 30) {
+            gaps.push(`Social loneliness (${soc.toFixed(1)}%) needs broad-base weak-tie creation; this event's audience is narrower.`);
+        }
+        if (support < 14) {
+            gaps.push(`Informal support (${support.toFixed(1)}%) is low; a single event won't convert weak ties to ongoing peer support without a follow-on programme.`);
+        }
+        if (anxiety >= 16 && !/quiet|mindful|drop-?in|low-barrier/.test((eventRecord?.title ?? '').toLowerCase())) {
+            gaps.push(`Anxiety/depression risk (${anxiety.toFixed(1)}%) is elevated; consider a quiet drop-in companion to lower the bar to entry.`);
+        }
+        if (gaps.length === 0) {
+            gaps.push("This event's design covers the buurt's primary signal, with no obvious blind spots.");
+        }
+
+        // ---------------- Suggestions ----------------
+        const suggestions = [];
+        if (mixFit < 0.75) {
+            const missing = AIService._missingChannelsFor(audienceShape, channels);
+            if (missing.length > 0) {
+                suggestions.push(`Add ${missing.slice(0, 2).join(' and ')} to the marketing mix — the cohort responds to these reliably.`);
+            }
+        }
+        if (status === 'completed' && reachedRatio !== null && reachedRatio < 0.9) {
+            suggestions.push('Recruit one or two existing volunteers as "anchor faces" to lift the next iteration\'s reach by 15–25%.');
+        }
+        if (/monthly|annual/.test(recurrence) && lonely >= 40) {
+            suggestions.push('Tighten the cadence to bi-weekly for the first quarter — this is where the regular-faces effect compounds.');
+        }
+        if (audienceShape.primary !== 'severe' && sev >= 14) {
+            suggestions.push('Pair this with a sibling event for housebound 65+ residents (e.g. door-to-door senior lunch) to cover the high-severity tail.');
+        }
+        if (audienceShape.primary === 'youth' && (!channels.includes('social_media') && !channels.includes('whatsapp_group'))) {
+            suggestions.push('Lean into social_media and the buurtapp groups — under-25s rarely see flyers.');
+        }
+        if (suggestions.length === 0) {
+            suggestions.push('Hold the design steady; the next iteration\'s biggest win is consistency of cadence.');
+        }
+
+        // ---------------- Reach assessment ----------------
+        let reachAssessment;
+        if (status === 'completed' && reachedRatio !== null) {
+            const ratio = reachedRatio;
+            reachAssessment = {
+                reachedRatio: ratio,
+                label: `${reached} of ${targeted} (${(ratio * 100).toFixed(0)}% of plan)`,
+                tone:  ratio >= 0.9 ? 'good' : ratio >= 0.5 ? 'warn' : 'bad'
+            };
+        } else if (targeted > 0) {
+            reachAssessment = {
+                label: `Target: ${targeted} residents`,
+                tone:  'neutral'
+            };
+        } else {
+            reachAssessment = { label: 'No reach target set', tone: 'warn' };
+        }
+
+        return {
+            effectivenessScore: score,
+            effectivenessRationale,
+            gaps: gaps.slice(0, 3),
+            suggestions: suggestions.slice(0, 3),
+            reachAssessment,
+            generatedAt: AIService._deterministicTimestamp(eventRecord, meta)
+        };
+    }
+
+    /** @private */
+    static _classifyAudience(audience) {
+        if (/(65\+|55\+|senior|elderly|housebound|65 or over)/.test(audience)) {
+            return { primary: 'severe', secondary: 'emotional', cohort: 'senior' };
+        }
+        if (/(18-?24|student|young adult|18-?35)/.test(audience)) {
+            return { primary: 'emotional', secondary: 'social', cohort: 'youth' };
+        }
+        if (/(parent|famil|child|school)/.test(audience)) {
+            return { primary: 'social', secondary: 'emotional', cohort: 'family' };
+        }
+        if (/(intergenerational|all ages|mixed)/.test(audience)) {
+            return { primary: 'social', secondary: 'severe', cohort: 'broad' };
+        }
+        return { primary: 'social', secondary: 'social', cohort: 'broad' };
+    }
+
+    /** @private */
+    static _dominantLoneliness({ sev, emo, soc }) {
+        // Normalise: sev range ~5-25, emo ~15-45, soc ~20-45.
+        const norm = {
+            severe:    (sev / 25),
+            emotional: (emo / 45),
+            social:    (soc / 45)
+        };
+        return Object.entries(norm).sort((a, b) => b[1] - a[1])[0][0];
+    }
+
+    /** @private */
+    static _channelMixFit(channels, audienceShape) {
+        if (channels.length === 0) return 0;
+        const youthSet  = ['social_media', 'whatsapp_group', 'school_network'];
+        const seniorSet = ['gp_referral', 'social_worker', 'flyer'];
+        const familySet = ['school_network', 'newsletter', 'whatsapp_group'];
+        const broadSet  = ['flyer', 'community_screen', 'newsletter'];
+        const target =
+            audienceShape.cohort === 'youth'  ? youthSet  :
+            audienceShape.cohort === 'senior' ? seniorSet :
+            audienceShape.cohort === 'family' ? familySet : broadSet;
+        const hits = channels.filter(c => target.includes(c)).length;
+        return hits / target.length;
+    }
+
+    /** @private */
+    static _missingChannelsFor(audienceShape, channels) {
+        const cohortChannels = {
+            youth:  ['social_media',  'whatsapp_group',  'school_network'],
+            senior: ['gp_referral',   'social_worker',   'flyer'],
+            family: ['school_network','newsletter',      'whatsapp_group'],
+            broad:  ['flyer',         'community_screen','newsletter']
+        }[audienceShape.cohort] ?? [];
+        return cohortChannels.filter(c => !channels.includes(c));
+    }
+
+    /**
+     * Stable timestamp derived from the event id + buurt id rather than
+     * Date.now() — so the "Generated at HH:MM" label in the AI feedback
+     * panel stays the same across re-renders, matching the demo's
+     * determinism convention.
+     * @private
+     */
+    static _deterministicTimestamp(eventRecord, meta) {
+        const seed = AIService._hashSeed(`${eventRecord?.id ?? 'ev'}|${meta?.parentDistrict ?? ''}`);
+        return new Date(Date.UTC(2026, 1, 5, 9 + (seed % 8), (seed >> 3) % 60)).toISOString();
+    }
+
+    /**
+     * Average a list of buurt-level metrics, used by `generateForSegment`.
+     * @private
+     */
+    static _averageBuurtenMetrics(buurtenData) {
+        const sums = new Map();
+        const counts = new Map();
+        for (const b of buurtenData ?? []) {
+            const m = b?.metrics ?? {};
+            for (const [k, v] of Object.entries(m)) {
+                if (!Number.isFinite(v)) continue;
+                sums.set(k,   (sums.get(k)   ?? 0) + v);
+                counts.set(k, (counts.get(k) ?? 0) + 1);
+            }
+        }
+        const out = {};
+        for (const def of METRIC_CATALOGUE) {
+            const n = counts.get(def.key) ?? 0;
+            out[def.key] = n > 0 ? sums.get(def.key) / n : 0;
+        }
+        return out;
+    }
 
     /**
      * Pure function: takes a district's data and returns a deterministic

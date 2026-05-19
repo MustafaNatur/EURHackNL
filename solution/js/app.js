@@ -1,78 +1,96 @@
-import { GeoService }         from './services/GeoService.js';
-import { DataService }        from './services/DataService.js';
-import { AIService }          from './services/AIService.js';
-import { MapController }      from './map/MapController.js';
-import { SidebarController }  from './ui/SidebarController.js';
-import { TimelineController } from './ui/TimelineController.js';
-import { LONELINESS_KEYS }    from './models/DistrictData.js';
+import { GeoService }            from './services/GeoService.js';
+import { DataService }           from './services/DataService.js';
+import { DemographicService }    from './services/DemographicService.js';
+import { EventStore }            from './services/EventStore.js';
+import { AIService }             from './services/AIService.js';
+import { MapController }         from './map/MapController.js';
+import { SidebarController }     from './ui/SidebarController.js';
+import { TimelineController }    from './ui/TimelineController.js';
+import { AnalyticsDashboard }    from './ui/AnalyticsDashboard.js';
+import { Toast }                 from './ui/Toast.js';
+import { Router }                from './router.js';
+import { LONELINESS_KEYS }       from './models/DistrictData.js';
 
 /**
  * Composition root.
  *
- * Wires together the layers:
- *   GeoService   — knows the shape of the city (static geometry)
- *   DataService  — knows how to obtain metrics for a district (fake for now)
- *   AIService    — fakes the loneliness-recommendation AI flow
- *   Map / Sidebar / Timeline controllers — present that information.
+ * Two top-level views, mounted/unmounted by the hash router:
  *
- * The controllers do not know about each other; this file is the only place
- * that orchestrates a flow across them.
+ *   #map        — existing geography-first explorer (MapController +
+ *                  TimelineController + SidebarController).
+ *   #analytics  — audience-first analytics surface with three sub-tabs:
+ *                  Insights · Events · Audiences (AnalyticsDashboard).
  *
- * Year flow (timeline):
- *   1. enrichFeaturesWithLoneliness bakes `lonelinessByYear: { 2018..2026 }`
- *      and an initial `lonelinessScore` onto every GeoJSON feature.
- *   2. When TimelineController emits a new year, `applyYearToFeatures`
- *      swaps `lonelinessScore` to that year's value and we ask the map
- *      to re-issue setData, which causes paint expressions to re-evaluate.
- *   3. If the sidebar is currently showing the stats screen for a buurt,
- *      we synchronously refresh it with that buurt's metrics for the
- *      new year — no latency, no race-conditions.
+ * Both views share the same singleton services (Geo, Data, Demographic,
+ * Event, AI) so an action in one view (e.g. "Save to registry" from a map
+ * recommendation card) is immediately visible in the other.
+ *
+ * The map view fully initialises on first mount and then sleeps when
+ * unmounted — its timeline autoplay is paused and the polygons stay
+ * rendered (MapLibre keeps the GL context warm), so navigating back is
+ * instant. The analytics view is lazy: its DemographicService only
+ * fetches the 3 MB demographic JSON when the route is first opened.
  */
 async function main() {
-    const geoService     = new GeoService();
-    const dataService    = new DataService();
-    const aiService      = new AIService();
-    const sidebar        = new SidebarController('sidebar');
-    const mapController  = new MapController('map', geoService);
+    // ----- Shared services (instantiated once, used by both views) -----
+    const geoService         = new GeoService();
+    const dataService        = new DataService();
+    const demographicService = new DemographicService();
+    const eventStore         = new EventStore();
+    const aiService          = new AIService();
 
-    let fc;
-    let db;
-    try {
-        [fc, db] = await Promise.all([
-            geoService.load(),
-            dataService.load()
-        ]);
-        enrichFeaturesWithLoneliness(fc, db);
-
-        await mapController.init();
-    } catch (err) {
-        console.error('Failed to initialise map:', err);
-        document.getElementById('map').innerHTML =
-            `<div style="padding:24px;color:#b91c1c;">Map failed to load: ${err.message}</div>`;
-        return;
-    }
-
-    const timeline = new TimelineController('map', {
-        years: dataService.getYears(),
-        initialYear: dataService.getDefaultYear()
-    });
-    timeline.init();
-    mapController.updateCityStats(timeline.getCurrentYear());
+    // ----- Map view DOM + controllers -----
+    const sidebar       = new SidebarController('sidebar');
+    const mapController = new MapController('map', geoService);
+    let   timeline      = null;
+    let   fc            = null;
+    let   db            = null;
 
     /** Tracks the in-flight district fetch so a quick re-click cancels the previous render. */
-    let activeRequestId = 0;
-    /** Tracks the in-flight AI analysis, bumped whenever a new buurt is selected. */
-    let activeAnalysisId = 0;
-    /** Cached centroid+meta for the currently selected district (needed for sync re-renders). */
-    let selectedCentroid = null;
-    let selectedMeta = null;
+    let activeRequestId   = 0;
+    let activeAnalysisId  = 0;
+    let selectedCentroid  = null;
+    let selectedMeta      = null;
+    /** True after `mountMap()` has run its one-shot init. */
+    let mapInitialised    = false;
 
+    // ----- Analytics view (lazily attached on first mount) -----
+    const analyticsView   = document.getElementById('view-analytics');
+    const analytics       = new AnalyticsDashboard({
+        geoService,
+        dataService,
+        demographicService,
+        eventStore,
+        aiService
+    });
+
+    // ----- Router wiring -----
+    const router = new Router({ defaultRoute: 'map' });
+    router.register('map', {
+        mount:   () => mountMap(),
+        unmount: () => unmountMap()
+    });
+    router.register('analytics', {
+        mount:   () => mountAnalytics(),
+        unmount: () => unmountAnalytics()
+    });
+
+    // Bridge from "Save to registry" toasts that fire from the map view
+    // to a navigation into the analytics Events tab.
+    Toast.onAction('navigate-events', () => {
+        analytics.setActiveTab('events');
+        router.navigate('analytics');
+    });
+
+    // Forward map selections to the analytics view so opening the
+    // dashboard "remembers" the buurt the user last clicked on the map.
     mapController.onDistrictSelected(async (districtId, districtName, centroid, meta) => {
         const requestId = ++activeRequestId;
         activeAnalysisId++;
         selectedCentroid = centroid;
         selectedMeta = meta;
 
+        analytics.setPreferredDistrict(districtId);
         sidebar.showLoading(districtName, meta);
 
         try {
@@ -81,11 +99,11 @@ async function main() {
                 districtName,
                 centroid,
                 {
-                    year: timeline.getCurrentYear(),
+                    year: timeline?.getCurrentYear() ?? dataService.getDefaultYear(),
                     population: meta?.population
                 }
             );
-            if (requestId !== activeRequestId) return; // stale; newer selection took over
+            if (requestId !== activeRequestId) return;
             sidebar.renderData({ ...data, meta });
         } catch (err) {
             if (requestId !== activeRequestId) return;
@@ -93,7 +111,7 @@ async function main() {
             sidebar.renderData({
                 districtId,
                 districtName,
-                year: timeline.getCurrentYear(),
+                year: timeline?.getCurrentYear() ?? dataService.getDefaultYear(),
                 centroid,
                 metrics: {},
                 meta
@@ -121,22 +139,145 @@ async function main() {
         }
     });
 
-    timeline.onYearChange((year) => {
-        applyYearToFeatures(fc, year);
-        mapController.refreshDistrictSource();
-        mapController.updateCityStats(year);
-
-        // Only refresh the sidebar when it's on the stats screen — we
-        // don't want to disrupt an active recommendations drill-in.
-        const districtId = sidebar.selectedDistrictId;
-        if (!districtId) return;
-        if (sidebar.screen !== SidebarController.SCREEN_STATS) return;
-
-        const data = dataService.getDistrictDataSync(districtId, year, {
-            centroid: selectedCentroid ?? [0, 0]
-        });
-        sidebar.renderData({ ...data, meta: selectedMeta ?? {} });
+    // When the user saves a recommendation card to the registry, the
+    // sidebar emits `save-event-to-registry`. We persist via EventStore
+    // and surface a toast with an action to jump into the registry.
+    sidebar.onSaveEventRequested((rec) => {
+        if (!sidebar.selectedDistrictId) return;
+        const districtName = sidebar.selectedDistrictName ?? '';
+        try {
+            const record = eventStore.fromRecommendation(
+                rec,
+                sidebar.selectedDistrictId,
+                districtName
+            );
+            eventStore.add(record);
+            Toast.show({
+                message: `Saved “${record.title}” to the event registry`,
+                action: { label: 'Open registry', id: 'navigate-events' }
+            });
+        } catch (err) {
+            console.error('Failed to save recommendation to registry:', err);
+            Toast.show({ message: 'Could not save event — see console for details.', tone: 'bad' });
+        }
     });
+
+    // ----- Boot the router -----
+    try {
+        await router.start();
+    } catch (err) {
+        console.error('Router failed to start:', err);
+    }
+
+    // ================================================================
+    //  #map mount / unmount
+    // ================================================================
+
+    async function mountMap() {
+        showView('map');
+        if (mapInitialised) {
+            // Re-entering the route — no init work needed. The MapLibre
+            // canvas keeps rendering, so the user sees the same map state
+            // they left.
+            return;
+        }
+
+        try {
+            if (!fc || !db) {
+                [fc, db] = await Promise.all([
+                    geoService.load(),
+                    dataService.load()
+                ]);
+                enrichFeaturesWithLoneliness(fc, db);
+            }
+            await mapController.init();
+        } catch (err) {
+            console.error('Failed to initialise map:', err);
+            const mapEl = document.getElementById('map');
+            if (mapEl) {
+                mapEl.innerHTML =
+                    `<div style="padding:24px;color:#b91c1c;">Map failed to load: ${err.message}</div>`;
+            }
+            return;
+        }
+
+        timeline = new TimelineController('map', {
+            years: dataService.getYears(),
+            initialYear: dataService.getDefaultYear()
+        });
+        timeline.init();
+        mapController.updateCityStats(timeline.getCurrentYear());
+
+        timeline.onYearChange((year) => {
+            applyYearToFeatures(fc, year);
+            mapController.refreshDistrictSource();
+            mapController.updateCityStats(year);
+
+            // Only refresh the sidebar when it's on the stats screen —
+            // we don't disrupt an active recommendations drill-in.
+            const districtId = sidebar.selectedDistrictId;
+            if (!districtId) return;
+            if (sidebar.screen !== SidebarController.SCREEN_STATS) return;
+
+            const data = dataService.getDistrictDataSync(districtId, year, {
+                centroid: selectedCentroid ?? [0, 0]
+            });
+            sidebar.renderData({ ...data, meta: selectedMeta ?? {} });
+        });
+
+        mapInitialised = true;
+    }
+
+    function unmountMap() {
+        // We don't tear down MapLibre — keeping it warm makes route
+        // transitions instant. But the timeline's autoplay timer must
+        // not keep firing while another view is on screen.
+        timeline?.pause?.();
+        hideView('map');
+    }
+
+    // ================================================================
+    //  #analytics mount / unmount
+    // ================================================================
+
+    async function mountAnalytics() {
+        showView('analytics');
+        // Ensure the main DB is loaded — Analytics relies on it for the
+        // city-average benchmark line and for buurt names in dropdowns.
+        if (!db) {
+            try {
+                db = await dataService.load();
+                if (fc) enrichFeaturesWithLoneliness(fc, db);
+            } catch (err) {
+                console.error('Failed to load core database for analytics:', err);
+            }
+        }
+        await analytics.mount(analyticsView);
+    }
+
+    async function unmountAnalytics() {
+        await analytics.unmount();
+        hideView('analytics');
+    }
+
+    // ================================================================
+    //  View visibility helper
+    // ================================================================
+
+    function showView(name) {
+        // Scope to direct children of .layout so sidebar tab buttons
+        // (which also carry data-view) are never accidentally hidden.
+        for (const el of document.querySelectorAll('.layout > [data-view]')) {
+            const active = el.getAttribute('data-view') === name;
+            el.hidden = !active;
+        }
+        document.body.setAttribute('data-active-view', name);
+    }
+
+    function hideView(name) {
+        const el = document.querySelector(`.layout > [data-view="${name}"]`);
+        if (el) el.hidden = true;
+    }
 }
 
 /**
@@ -145,8 +286,7 @@ async function main() {
  *   - `lonelinessScore`   : the active year's score (initially the default)
  *   - `lonelinessSource`  : "csv" / "csv-partial" / "generated"
  *
- * This is run once at startup so subsequent year scrubs are O(features)
- * with no async work.
+ * Idempotent — safe to call multiple times.
  *
  * @param {GeoJSON.FeatureCollection} fc
  * @param {{
@@ -185,8 +325,6 @@ function enrichFeaturesWithLoneliness(fc, db) {
                 if (s != null) byYear[year] = s;
             }
         } else if (rec.metrics) {
-            // Legacy v1: a single year of metrics. Project it across the
-            // year list so the timeline still has something to render.
             const s = score(rec.metrics);
             if (s != null) {
                 for (const year of years) byYear[year] = s;

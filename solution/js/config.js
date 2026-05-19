@@ -34,9 +34,18 @@ export const AppConfig = Object.freeze({
     /**
      * Path to the pre-built local "database" — a single JSON file holding
      * both real CSV-derived data and stable, pre-generated values for the
-     * remaining buurten. Built by `scripts/build_database.py`.
+     * remaining buurten. Built by `scripts/build_database.py`. The same
+     * script also bakes in the timeline amplification that used to be
+     * applied at runtime, so the values on disk are what the UI shows.
      */
     databasePath: 'data/neighborhoods_database.json',
+
+    /**
+     * Companion file with per-buurt × year × age × gender slices. Built
+     * by the same script; consumed only by the Analytics view, so the
+     * front-end loads it lazily.
+     */
+    demographicPath: 'data/neighborhoods_demographic.json',
 
     /** Default reporting year used by DataService when none is specified. */
     defaultYear: 2026,
@@ -52,32 +61,5 @@ export const AppConfig = Object.freeze({
      * the UI's staged loader feels deliberate rather than instant.
      */
     aiStageMinMs: 700,
-    aiStageMaxMs: 1200,
-
-    /**
-     * Timeline "demo" amplification. The CSV's real year-over-year
-     * variation for any single buurt is usually <1 percentage point —
-     * too small to be visible on the green->red ramp during the demo.
-     *
-     * When enabled, DataService rewrites the in-memory metrics so each
-     * buurt has:
-     *   - amplified variance around its own mean
-     *     (`(raw - mean) * demoAmplifyFactor`)
-     *   - a deterministic per-buurt trend made of a linear ramp plus a
-     *     sinusoidal wiggle, both seeded by the districtId. The ramp is
-     *     bipolar — every buurt gets a trend magnitude of at least 40%
-     *     of `demoAmplifyTrendMaxPp` at the timeline extremes (vs. the
-     *     middle year), guaranteeing a clearly visible direction.
-     *
-     * Trend semantics: `demoAmplifyTrendMaxPp` is the maximum percentage-
-     * point offset *at the extreme years* relative to the middle year.
-     * Span-invariant: changing the year range doesn't blow up the swing.
-     *
-     * The result: some buurten visibly worsen across the timeline,
-     * others improve, others zig-zag. Disk data is untouched.
-     */
-    demoTimelineAmplify: true,
-    demoAmplifyFactor: 6,
-    demoAmplifyTrendMaxPp: 14,
-    demoAmplifyWaveMaxPp: 5
+    aiStageMaxMs: 1200
 });

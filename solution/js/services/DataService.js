@@ -2,8 +2,7 @@ import { AppConfig } from '../config.js';
 import {
     METRIC_CATALOGUE,
     PUBLIC_PLACE_CATALOGUE,
-    OUTREACH_CHANNEL_CATALOGUE,
-    LONELINESS_KEYS
+    OUTREACH_CHANNEL_CATALOGUE
 } from '../models/DistrictData.js';
 
 /**
@@ -68,7 +67,6 @@ export class DataService {
                         throw new Error(`Failed to load database: HTTP ${response.status}`);
                     }
                     this._db = await response.json();
-                    DataService._amplifyForDemo(this._db);
                     return this._db;
                 });
         }
@@ -251,114 +249,5 @@ export class DataService {
     /** @private */
     static _emptyOutreach() {
         return OUTREACH_CHANNEL_CATALOGUE.map(def => ({ key: def.key, count: 0 }));
-    }
-
-    // ----------------------------------------------------------------
-    //  Demo amplification
-    // ----------------------------------------------------------------
-
-    /**
-     * Mutates `db.neighborhoods[*].metricsByYear[*]` in place to amplify
-     * the year-over-year variance of the four loneliness metrics. See
-     * `AppConfig.demoTimelineAmplify` for the rationale.
-     *
-     * Per buurt, three deterministic ingredients combine into the year's
-     * value (anchored on the buurt's mean):
-     *
-     *   1. Variance amplification of the raw deviations (factor).
-     *   2. A bipolar linear ramp from the middle year out to the extremes.
-     *      The ramp magnitude at the extremes is at least 40% of the
-     *      configured max, so no buurt stays flat. Span-invariant: the
-     *      maximum offset is `demoAmplifyTrendMaxPp` regardless of how
-     *      many years the timeline covers.
-     *   3. A sinusoidal "wave" component with per-buurt amplitude and
-     *      phase, so even buurten with similar ramps don't move in
-     *      lockstep — some peak mid-window, others trough.
-     *
-     * Determinism: all three components are seeded by the districtId via
-     * an FNV-1a hash, so the same buurt always tells the same story.
-     *
-     * Safety: amplified values are clamped to [0, 100]. The 14
-     * non-loneliness metrics are left untouched so the rest of the
-     * sidebar stays anchored to reality.
-     *
-     * @private
-     */
-    static _amplifyForDemo(db) {
-        if (!AppConfig.demoTimelineAmplify) return;
-        const years = Array.isArray(db?.years) ? db.years.slice().sort((a, b) => a - b) : [];
-        if (years.length < 2) return;
-
-        const middle    = (years[0] + years[years.length - 1]) / 2;
-        const span      = years[years.length - 1] - years[0];
-        const halfSpan  = Math.max(1, span / 2);                   // pivot to extremes
-        const factor    = AppConfig.demoAmplifyFactor    ?? 1;
-        const trendMax  = AppConfig.demoAmplifyTrendMaxPp ?? 0;
-        const waveMax   = AppConfig.demoAmplifyWaveMaxPp ?? 0;
-
-        for (const [id, rec] of Object.entries(db.neighborhoods ?? {})) {
-            if (!rec?.metricsByYear) continue;
-            const { trendPp, waveAmp, wavePhase } = DataService._trajectoryFor(id, trendMax, waveMax);
-
-            for (const key of LONELINESS_KEYS) {
-                const series = years.map(y => rec.metricsByYear[String(y)]?.[key]);
-                const finite = series.filter(Number.isFinite);
-                if (finite.length === 0) continue;
-                const mean = finite.reduce((a, b) => a + b, 0) / finite.length;
-
-                for (let i = 0; i < years.length; i++) {
-                    const year = years[i];
-                    const m = rec.metricsByYear[String(year)];
-                    if (!m) continue;
-                    const raw = series[i];
-                    if (!Number.isFinite(raw)) continue;
-                    // Linear ramp in [-trendPp, +trendPp] — span-invariant.
-                    const ramp = trendPp * ((year - middle) / halfSpan);
-                    // One full sine cycle across the year span — so peaks
-                    // and troughs land inside the slider, not at the edges.
-                    const wave = waveAmp * Math.sin(
-                        2 * Math.PI * (year - years[0]) / Math.max(1, span) + wavePhase
-                    );
-                    const amplified = mean + (raw - mean) * factor + ramp + wave;
-                    m[key] = Math.max(0, Math.min(100, Math.round(amplified * 10) / 10));
-                }
-            }
-        }
-    }
-
-    /**
-     * Deterministic per-buurt trajectory parameters.
-     *
-     *   trendPp   : max pp offset at the extreme years (bipolar);
-     *               magnitude in [0.4*trendMax, trendMax]
-     *   waveAmp   : pp peak amplitude in [0.4*waveMax, waveMax]
-     *   wavePhase : 0..2π
-     *
-     * @private
-     */
-    static _trajectoryFor(id, trendMax, waveMax) {
-        const a = DataService._hashUnit(id, 'trend');
-        const b = DataService._hashUnit(id, 'wave-amp');
-        const c = DataService._hashUnit(id, 'wave-phase');
-
-        const sign = a < 0.5 ? -1 : 1;
-        const t    = a < 0.5 ? a * 2 : (a - 0.5) * 2;        // [0, 1)
-        // Keep the inner 40% of the range empty so no buurt is flat.
-        const trendPp = sign * (trendMax * 0.4 + t * trendMax * 0.6);
-
-        const waveAmp = waveMax * (0.4 + b * 0.6);
-        const wavePhase = c * 2 * Math.PI;
-        return { trendPp, waveAmp, wavePhase };
-    }
-
-    /** FNV-1a hash of (id, salt) mapped to [0, 1). @private */
-    static _hashUnit(id, salt) {
-        let h = 2166136261 >>> 0;
-        const str = `${id}|${salt}`;
-        for (let i = 0; i < str.length; i++) {
-            h ^= str.charCodeAt(i);
-            h = Math.imul(h, 16777619);
-        }
-        return (h >>> 0) / 4294967296;
     }
 }

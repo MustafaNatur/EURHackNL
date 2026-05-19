@@ -18,17 +18,33 @@
                 <p class="topbar__subtitle">Click a neighborhood to inspect well-being indicators</p>
             </div>
         </div>
+        <nav class="topbar__nav" role="navigation" aria-label="Main navigation">
+            <a href="#map"       class="topbar__nav-btn" data-route="map">
+                <span class="topbar__nav-icon" aria-hidden="true">🗺</span>
+                <span class="topbar__nav-label">Map</span>
+            </a>
+            <a href="#analytics" class="topbar__nav-btn" data-route="analytics">
+                <span class="topbar__nav-icon" aria-hidden="true">📊</span>
+                <span class="topbar__nav-label">Analytics</span>
+            </a>
+        </nav>
         <div class="topbar__meta">
             <span class="topbar__badge">Survey 2018 – 2026</span>
         </div>
     </header>
 
     <main class="layout">
-        <div id="map" class="map" aria-label="Map of Rotterdam neighborhoods"></div>
-        <aside id="sidebar" aria-live="polite"></aside>
+        <section id="view-map" class="view view--map" data-view="map">
+            <div id="map" class="map" aria-label="Map of Rotterdam neighborhoods"></div>
+            <aside id="sidebar" aria-live="polite"></aside>
+        </section>
+        <section id="view-analytics" class="view view--analytics" data-view="analytics" hidden></section>
     </main>
 
+    <div id="toast-region" class="toast-region" aria-live="polite" aria-atomic="true"></div>
+
     <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
     <script type="module" src="js/app.js"></script>
 </body>
 </html>

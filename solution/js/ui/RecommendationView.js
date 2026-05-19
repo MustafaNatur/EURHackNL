@@ -273,19 +273,30 @@ export class RecommendationView {
 
     /**
      * Kind-specific call-to-action affordances rendered in the card
-     * footer. Today only `event` has one: "Host with Luma".
+     * footer. Event cards get two CTAs:
+     *   1. "Save to registry" — primary action, persists the event into
+     *      the EventStore so it shows up in the Analytics > Events tab.
+     *   2. "Host with Luma"   — secondary demo gimmick (existing).
      * @private
      */
     static _renderActions(rec, index) {
         if (rec.kind !== 'event') return '';
         const indexAttr = Number.isFinite(index) ? ` data-rec-index="${index}"` : '';
         return `
-            <button type="button" class="luma-host-btn"
-                    data-role="host-luma"${indexAttr}
-                    aria-label="Host this event on Luma">
-                <span class="luma-host-btn__mark" aria-hidden="true">lu·ma</span>
-                <span class="luma-host-btn__label">Host with Luma</span>
-            </button>
+            <div class="rec-card__actions">
+                <button type="button" class="save-event-btn"
+                        data-role="save-event"${indexAttr}
+                        aria-label="Save this event to the registry">
+                    <span class="save-event-btn__icon" aria-hidden="true">＋</span>
+                    <span class="save-event-btn__label">Save to registry</span>
+                </button>
+                <button type="button" class="luma-host-btn luma-host-btn--secondary"
+                        data-role="host-luma"${indexAttr}
+                        aria-label="Host this event on Luma">
+                    <span class="luma-host-btn__mark" aria-hidden="true">lu·ma</span>
+                    <span class="luma-host-btn__label">Host with Luma</span>
+                </button>
+            </div>
         `;
     }
 

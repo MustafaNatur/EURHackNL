@@ -49,6 +49,8 @@ export class SidebarController {
         this._lastRecs = null;
         /** @type {((data: any) => void) | null} */
         this._onAnalyze = null;
+        /** @type {((rec: any) => void) | null} */
+        this._onSaveEvent = null;
         this._installSkeleton();
     }
 
@@ -110,7 +112,33 @@ export class SidebarController {
                 this._openLumaForCard(host);
                 return;
             }
+            const save = e.target.closest('[data-role="save-event"]');
+            if (save && !save.disabled) {
+                this._saveEventFromCard(save);
+                return;
+            }
         });
+    }
+
+    /** @private */
+    _saveEventFromCard(buttonEl) {
+        if (!this._lastRecs || !this._onSaveEvent) return;
+        const idx = Number(buttonEl.getAttribute('data-rec-index'));
+        if (!Number.isFinite(idx)) return;
+        const rec = this._lastRecs[idx];
+        if (!rec || rec.kind !== 'event') return;
+        try {
+            this._onSaveEvent(rec);
+            // Reflect "saved" state on the card so the user doesn't
+            // double-click a second time. Disable + swap label only;
+            // the card itself stays interactive (Luma button still works).
+            buttonEl.disabled = true;
+            buttonEl.classList.add('save-event-btn--saved');
+            const labelEl = buttonEl.querySelector('.save-event-btn__label');
+            if (labelEl) labelEl.textContent = 'Saved to registry';
+        } catch (err) {
+            console.error('Sidebar: save-to-registry handler threw', err);
+        }
     }
 
     /** @private */
@@ -146,6 +174,17 @@ export class SidebarController {
     }
 
     /**
+     * Register a callback fired when the user taps "Save to registry"
+     * on an event-kind recommendation card. The callback receives the
+     * full `EventRecommendation` object so the host can decide how to
+     * persist it.
+     * @param {(rec: any) => void} callback
+     */
+    onSaveEventRequested(callback) {
+        this._onSaveEvent = callback;
+    }
+
+    /**
      * Which top-level screen the sidebar is currently showing.
      * Useful to consumers that want to refresh the stats screen without
      * disrupting an active recommendations drill-in.
@@ -163,6 +202,15 @@ export class SidebarController {
      */
     get selectedDistrictId() {
         return this._lastData?.districtId ?? null;
+    }
+
+    /**
+     * Name of the currently-rendered district, or `null`. Used by the
+     * "Save to registry" flow which records the buurt name on the event.
+     * @returns {string|null}
+     */
+    get selectedDistrictName() {
+        return this._lastData?.districtName ?? null;
     }
 
     /**
@@ -273,6 +321,15 @@ export class SidebarController {
         this._root.classList.toggle('sidebar--screen-rec', onRecs);
         this._tabsEl.hidden = onRecs;
         this._backBtn.hidden = !onRecs;
+        // Belt-and-suspenders: the tab buttons share the `data-view`
+        // attribute namespace with the router's top-level views, so a
+        // stray global `[data-view]` selector elsewhere can flip them
+        // to hidden. Re-assert visibility whenever we (re)enter stats.
+        if (!onRecs) {
+            for (const btn of this._tabsEl.querySelectorAll('[data-view]')) {
+                btn.hidden = false;
+            }
+        }
         this._eyebrowEl.textContent = onRecs
             ? 'AI assistant'
             : 'Rotterdam neighborhood';

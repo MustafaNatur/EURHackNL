@@ -112,6 +112,15 @@ export class TimelineController {
     }
 
     /**
+     * Stops autoplay if it's currently running. Safe to call when not
+     * playing — it's a no-op. Used by the router so the slider doesn't
+     * keep ticking while the user is on another route.
+     */
+    pause() {
+        if (this._playing) this._stopAutoplay();
+    }
+
+    /**
      * Set the year programmatically. No-op if already on that year.
      * Does not toggle autoplay state.
      * @param {number} year
