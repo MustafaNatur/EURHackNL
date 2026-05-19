@@ -43,5 +43,14 @@ export const AppConfig = Object.freeze({
 
     /** Simulated network latency bounds for the fake DataService (milliseconds). */
     fakeRequestMinMs: 600,
-    fakeRequestMaxMs: 1400
+    fakeRequestMaxMs: 1400,
+
+    /**
+     * Per-stage delay bounds (milliseconds) for AIService. The fake AI
+     * walks through three stages — Analyzing, Thinking, Generating — and
+     * pauses a random duration inside this range between each one, so
+     * the UI's staged loader feels deliberate rather than instant.
+     */
+    aiStageMinMs: 700,
+    aiStageMaxMs: 1200
 });

@@ -1,5 +1,6 @@
 import { GeoService }       from './services/GeoService.js';
 import { DataService }      from './services/DataService.js';
+import { AIService }        from './services/AIService.js';
 import { MapController }    from './map/MapController.js';
 import { SidebarController } from './ui/SidebarController.js';
 import { LONELINESS_KEYS }  from './models/DistrictData.js';
@@ -18,6 +19,7 @@ import { LONELINESS_KEYS }  from './models/DistrictData.js';
 async function main() {
     const geoService     = new GeoService();
     const dataService    = new DataService();
+    const aiService      = new AIService();
     const sidebar        = new SidebarController('sidebar');
     const mapController  = new MapController('map', geoService);
 
@@ -40,11 +42,15 @@ async function main() {
         return;
     }
 
-    /** Tracks the in-flight request so a quick re-click cancels the previous render. */
+    /** Tracks the in-flight district fetch so a quick re-click cancels the previous render. */
     let activeRequestId = 0;
+    /** Tracks the in-flight AI analysis, bumped whenever a new buurt is selected. */
+    let activeAnalysisId = 0;
 
     mapController.onDistrictSelected(async (districtId, districtName, centroid, meta) => {
         const requestId = ++activeRequestId;
+        // Any in-flight analysis is implicitly stale once the selection changes.
+        activeAnalysisId++;
 
         sidebar.showLoading(districtName, meta);
 
@@ -68,6 +74,26 @@ async function main() {
                 metrics: {},
                 meta
             });
+        }
+    });
+
+    sidebar.onAnalyzeRequested(async (districtData) => {
+        const analysisId = ++activeAnalysisId;
+        sidebar.showRecommendationsLoading('analyzing');
+
+        try {
+            const recs = await aiService.generate(districtData, {
+                onStage: (stage) => {
+                    if (analysisId !== activeAnalysisId) return;
+                    sidebar.showRecommendationsLoading(stage);
+                }
+            });
+            if (analysisId !== activeAnalysisId) return;
+            sidebar.showRecommendations(recs);
+        } catch (err) {
+            if (analysisId !== activeAnalysisId) return;
+            console.error('AI analysis failed:', err);
+            sidebar.showRecommendationsError(err);
         }
     });
 }

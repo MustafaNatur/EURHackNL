@@ -4,22 +4,33 @@ import {
     PUBLIC_PLACE_CATALOGUE,
     SOCIAL_PLACES_KEYS
 } from '../models/DistrictData.js';
+import { RecommendationView } from './RecommendationView.js';
 
 /**
  * SidebarController
  * -----------------
- * Owns the right-hand info panel. Three states:
- *   - hidden  : initial state, off-screen
- *   - loading : neighborhood selected, request in flight (spinner)
- *   - data    : data rendered
+ * Owns the right-hand info panel. Two top-level screens:
  *
- * The panel offers two views — "Health & loneliness" and "Public places" —
- * controlled by a segmented tab control. The view choice is remembered so
- * the user can compare the same view across different neighborhoods.
+ *   stats           - the existing "Health & loneliness" / "Public places"
+ *                     tabbed view of the selected neighborhood.
+ *   recommendations - drill-in AI recommendations for the same buurt,
+ *                     reached via the AI CTA in the stats body. The
+ *                     panel keeps the same geometry; only the header
+ *                     actions and the body morph.
+ *
+ * Inside `stats`, two sub-views are toggleable via tabs:
+ *   - VIEW_HEALTH : metrics
+ *   - VIEW_PLACES : public-place counts
+ *
+ * The recommendations screen is rendered by RecommendationView; this
+ * controller only owns state and DOM lifecycle.
  */
 export class SidebarController {
     static VIEW_HEALTH = 'health';
     static VIEW_PLACES = 'places';
+
+    static SCREEN_STATS = 'stats';
+    static SCREEN_RECS  = 'recommendations';
 
     /** @param {string} rootId */
     constructor(rootId) {
@@ -29,8 +40,12 @@ export class SidebarController {
         }
         /** @type {'health'|'places'} */
         this._activeView = SidebarController.VIEW_HEALTH;
-        /** Last rendered data, kept so we can re-render on tab switch. */
+        /** @type {'stats'|'recommendations'} */
+        this._screen = SidebarController.SCREEN_STATS;
+        /** Last rendered data, kept so we can re-render on tab switch or back. */
         this._lastData = null;
+        /** @type {((data: any) => void) | null} */
+        this._onAnalyze = null;
         this._installSkeleton();
     }
 
@@ -40,7 +55,11 @@ export class SidebarController {
         this._root.innerHTML = `
             <button type="button" class="sidebar__close" aria-label="Close panel">&times;</button>
             <header class="sidebar__header">
-                <span class="sidebar__eyebrow">Rotterdam neighborhood</span>
+                <button type="button" class="sidebar__back" data-role="back" hidden>
+                    <span class="sidebar__back-arrow" aria-hidden="true">←</span>
+                    Back to indicators
+                </button>
+                <span class="sidebar__eyebrow" data-role="eyebrow">Rotterdam neighborhood</span>
                 <h2 class="sidebar__title" data-role="title">—</h2>
                 <p class="sidebar__subtitle" data-role="subtitle"></p>
                 <div class="tabs" role="tablist" data-role="tabs">
@@ -60,21 +79,43 @@ export class SidebarController {
 
         this._titleEl    = this._root.querySelector('[data-role="title"]');
         this._subtitleEl = this._root.querySelector('[data-role="subtitle"]');
+        this._eyebrowEl  = this._root.querySelector('[data-role="eyebrow"]');
         this._bodyEl     = this._root.querySelector('[data-role="body"]');
         this._footerEl   = this._root.querySelector('[data-role="footer"]');
         this._tabsEl     = this._root.querySelector('[data-role="tabs"]');
+        this._backBtn    = this._root.querySelector('[data-role="back"]');
         this._closeBtn   = this._root.querySelector('.sidebar__close');
 
         this._closeBtn.addEventListener('click', () => this.hide());
+        this._backBtn.addEventListener('click', () => this._navigateBack());
         this._tabsEl.addEventListener('click', (e) => {
             const btn = e.target.closest('[data-view]');
             if (!btn) return;
             this._setActiveView(btn.dataset.view);
         });
+
+        // Delegated handler for the AI CTA. Lives in the body, so we
+        // listen on the body's stable parent to survive innerHTML resets.
+        this._bodyEl.addEventListener('click', (e) => {
+            const btn = e.target.closest('[data-role="analyze"]');
+            if (!btn || btn.disabled) return;
+            this._emitAnalyze();
+        });
     }
 
     hide() {
         this._root.classList.remove('sidebar--open');
+        this._setScreen(SidebarController.SCREEN_STATS);
+    }
+
+    /**
+     * Register a callback fired when the user taps the AI CTA. The
+     * callback receives the last data the sidebar rendered (same shape
+     * as `renderData`'s argument).
+     * @param {(data: any) => void} callback
+     */
+    onAnalyzeRequested(callback) {
+        this._onAnalyze = callback;
     }
 
     /**
@@ -83,6 +124,7 @@ export class SidebarController {
      */
     showLoading(districtName, meta = {}) {
         this._lastData = null;
+        this._setScreen(SidebarController.SCREEN_STATS);
         this._root.classList.add('sidebar--open');
         this._titleEl.textContent = districtName;
         this._subtitleEl.innerHTML = SidebarController._renderSubtitle(meta);
@@ -104,11 +146,79 @@ export class SidebarController {
     renderData(data) {
         this._lastData = data;
         const meta = data.meta ?? {};
+        this._setScreen(SidebarController.SCREEN_STATS);
         this._root.classList.add('sidebar--open');
         this._titleEl.textContent = data.districtName;
         this._subtitleEl.innerHTML = SidebarController._renderSubtitle(meta, data.year, data.source);
         this._footerEl.innerHTML = SidebarController._renderFooter(data);
         this._renderActiveView();
+    }
+
+    // ----------------------------------------------------------------
+    //  Recommendations screen
+    // ----------------------------------------------------------------
+
+    /**
+     * Switch to the recommendations screen and show the AI staged loader
+     * at the given stage id (one of AI_STAGES[].id).
+     * @param {string} stageId
+     */
+    showRecommendationsLoading(stageId) {
+        this._setScreen(SidebarController.SCREEN_RECS);
+        this._bodyEl.innerHTML = RecommendationView.renderLoader(stageId);
+    }
+
+    /**
+     * @param {import('../models/RecommendationData.js').Recommendation[]} recs
+     */
+    showRecommendations(recs) {
+        this._setScreen(SidebarController.SCREEN_RECS);
+        this._bodyEl.innerHTML = RecommendationView.renderRecommendations(recs);
+        this._bodyEl.scrollTop = 0;
+    }
+
+    /**
+     * @param {Error|string} err
+     */
+    showRecommendationsError(err) {
+        this._setScreen(SidebarController.SCREEN_RECS);
+        const msg = err instanceof Error ? err.message : String(err);
+        this._bodyEl.innerHTML = RecommendationView.renderError(msg);
+    }
+
+    /** @private */
+    _navigateBack() {
+        if (this._lastData) {
+            this.renderData(this._lastData);
+        } else {
+            this._setScreen(SidebarController.SCREEN_STATS);
+            this._bodyEl.innerHTML = '';
+        }
+    }
+
+    /** @private */
+    _emitAnalyze() {
+        if (!this._onAnalyze || !this._lastData) return;
+        this._onAnalyze(this._lastData);
+    }
+
+    // ----------------------------------------------------------------
+    //  Screen / view state
+    // ----------------------------------------------------------------
+
+    /** @private */
+    _setScreen(screen) {
+        if (screen === this._screen) {
+            // Still re-sync DOM state in case it diverged.
+        }
+        this._screen = screen;
+        const onRecs = screen === SidebarController.SCREEN_RECS;
+        this._root.classList.toggle('sidebar--screen-rec', onRecs);
+        this._tabsEl.hidden = onRecs;
+        this._backBtn.hidden = !onRecs;
+        this._eyebrowEl.textContent = onRecs
+            ? 'AI assistant'
+            : 'Rotterdam neighborhood';
     }
 
     /** @private */
@@ -128,12 +238,40 @@ export class SidebarController {
     /** @private */
     _renderActiveView() {
         if (!this._lastData) return;
-        if (this._activeView === SidebarController.VIEW_HEALTH) {
-            this._bodyEl.innerHTML = SidebarController._renderHealthView(this._lastData);
-        } else {
-            this._bodyEl.innerHTML = SidebarController._renderPlacesView(this._lastData);
-        }
+        const cta = SidebarController._renderAnalyzeCta(this._lastData);
+        const body = this._activeView === SidebarController.VIEW_HEALTH
+            ? SidebarController._renderHealthView(this._lastData)
+            : SidebarController._renderPlacesView(this._lastData);
+        this._bodyEl.innerHTML = `${cta}${body}`;
         this._bodyEl.scrollTop = 0;
+    }
+
+    // ----------------------------------------------------------------
+    //  AI CTA
+    // ----------------------------------------------------------------
+
+    /** @private */
+    static _renderAnalyzeCta(data) {
+        const cat = data.meta?.category ?? 'residential';
+        const isResidential = cat === 'residential';
+        const disabledAttr = isResidential ? '' : 'disabled';
+        const titleAttr = isResidential
+            ? 'Generate AI-tailored interventions for this buurt'
+            : 'Few residents — analysis is not meaningful for this area type';
+        const hint = isResidential
+            ? 'Generate tailored interventions for this neighborhood'
+            : 'Analysis is reserved for residential buurten';
+        return `
+            <button type="button" class="ai-cta" data-role="analyze"
+                    title="${titleAttr}" ${disabledAttr}>
+                <span class="ai-cta__sparkle" aria-hidden="true">✦</span>
+                <span class="ai-cta__text">
+                    <span class="ai-cta__title">Analyze and propose enhancements</span>
+                    <span class="ai-cta__hint">${hint}</span>
+                </span>
+                <span class="ai-cta__arrow" aria-hidden="true">→</span>
+            </button>
+        `;
     }
 
     // ----------------------------------------------------------------
