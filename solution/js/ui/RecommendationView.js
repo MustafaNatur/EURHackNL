@@ -96,7 +96,11 @@ export class RecommendationView {
             `;
         }
 
-        const groups = RecommendationView._groupByKind(recs);
+        // Decorate each recommendation with its index in the original
+        // list so the host (SidebarController) can find it back from
+        // a button click via data attribute, even after we group.
+        const indexed = recs.map((rec, i) => ({ rec, index: i }));
+        const groups = RecommendationView._groupByKind(indexed);
         const summary = RecommendationView._renderSummary(recs);
 
         const sections = groups.map(({ kind, items }) => {
@@ -109,7 +113,9 @@ export class RecommendationView {
                         <span class="rec-group__count">${items.length}</span>
                     </h3>
                     <ul class="rec-list">
-                        ${items.map(RecommendationView.renderEntityCard).join('')}
+                        ${items.map(({ rec, index }) =>
+                            RecommendationView.renderEntityCard(rec, index)
+                        ).join('')}
                     </ul>
                 </section>
             `;
@@ -120,15 +126,20 @@ export class RecommendationView {
 
     /**
      * @param {import('../models/RecommendationData.js').Recommendation} rec
+     * @param {number} [index] - position in the original list; emitted as
+     *                           `data-rec-index` so a host can re-resolve
+     *                           the full object on click.
      */
-    static renderEntityCard(rec) {
+    static renderEntityCard(rec, index) {
         const meta = RECOMMENDATION_KINDS[rec.kind];
         const impact = RecommendationView._renderImpact(rec.expectedImpact);
         const priority = RecommendationView._renderPriority(rec.priority);
         const facts = RecommendationView._renderFacts(rec);
+        const actions = RecommendationView._renderActions(rec, index);
+        const indexAttr = Number.isFinite(index) ? ` data-rec-index="${index}"` : '';
 
         return `
-            <li class="rec-card rec-card--${meta.tone}" data-kind="${rec.kind}">
+            <li class="rec-card rec-card--${meta.tone}" data-kind="${rec.kind}"${indexAttr}>
                 <header class="rec-card__head">
                     <span class="rec-card__eyebrow">
                         <span class="rec-card__icon" aria-hidden="true">${meta.icon}</span>
@@ -139,8 +150,29 @@ export class RecommendationView {
                 <h4 class="rec-card__title">${rec.title}</h4>
                 <p class="rec-card__rationale">${rec.rationale}</p>
                 ${facts}
-                ${impact}
+                <div class="rec-card__footer">
+                    ${impact}
+                    ${actions}
+                </div>
             </li>
+        `;
+    }
+
+    /**
+     * Kind-specific call-to-action affordances rendered in the card
+     * footer. Today only `event` has one: "Host with Luma".
+     * @private
+     */
+    static _renderActions(rec, index) {
+        if (rec.kind !== 'event') return '';
+        const indexAttr = Number.isFinite(index) ? ` data-rec-index="${index}"` : '';
+        return `
+            <button type="button" class="luma-host-btn"
+                    data-role="host-luma"${indexAttr}
+                    aria-label="Host this event on Luma">
+                <span class="luma-host-btn__mark" aria-hidden="true">lu·ma</span>
+                <span class="luma-host-btn__label">Host with Luma</span>
+            </button>
         `;
     }
 
@@ -148,12 +180,18 @@ export class RecommendationView {
     //  Internals
     // ----------------------------------------------------------------
 
-    /** @private */
-    static _groupByKind(recs) {
+    /**
+     * Groups recommendation/index pairs by their `kind`, preserving the
+     * order declared in RECOMMENDATION_KINDS.
+     * @private
+     * @param {{rec: import('../models/RecommendationData.js').Recommendation, index: number}[]} indexed
+     */
+    static _groupByKind(indexed) {
         const byKind = new Map();
-        for (const rec of recs) {
-            if (!byKind.has(rec.kind)) byKind.set(rec.kind, []);
-            byKind.get(rec.kind).push(rec);
+        for (const pair of indexed) {
+            const kind = pair.rec.kind;
+            if (!byKind.has(kind)) byKind.set(kind, []);
+            byKind.get(kind).push(pair);
         }
         return Array.from(byKind.entries())
             .map(([kind, items]) => ({ kind, items }))

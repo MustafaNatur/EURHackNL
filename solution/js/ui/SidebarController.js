@@ -5,6 +5,7 @@ import {
     SOCIAL_PLACES_KEYS
 } from '../models/DistrictData.js';
 import { RecommendationView } from './RecommendationView.js';
+import { LumaModal } from './LumaModal.js';
 
 /**
  * SidebarController
@@ -44,6 +45,8 @@ export class SidebarController {
         this._screen = SidebarController.SCREEN_STATS;
         /** Last rendered data, kept so we can re-render on tab switch or back. */
         this._lastData = null;
+        /** Last recommendations rendered, so click handlers can resolve indices. */
+        this._lastRecs = null;
         /** @type {((data: any) => void) | null} */
         this._onAnalyze = null;
         this._installSkeleton();
@@ -94,12 +97,32 @@ export class SidebarController {
             this._setActiveView(btn.dataset.view);
         });
 
-        // Delegated handler for the AI CTA. Lives in the body, so we
-        // listen on the body's stable parent to survive innerHTML resets.
+        // Delegated handlers for body interactions. We listen on the
+        // stable body element so innerHTML swaps don't drop the wiring.
         this._bodyEl.addEventListener('click', (e) => {
-            const btn = e.target.closest('[data-role="analyze"]');
-            if (!btn || btn.disabled) return;
-            this._emitAnalyze();
+            const analyze = e.target.closest('[data-role="analyze"]');
+            if (analyze && !analyze.disabled) {
+                this._emitAnalyze();
+                return;
+            }
+            const host = e.target.closest('[data-role="host-luma"]');
+            if (host) {
+                this._openLumaForCard(host);
+                return;
+            }
+        });
+    }
+
+    /** @private */
+    _openLumaForCard(buttonEl) {
+        if (!this._lastRecs) return;
+        const idx = Number(buttonEl.getAttribute('data-rec-index'));
+        if (!Number.isFinite(idx)) return;
+        const rec = this._lastRecs[idx];
+        if (!rec || rec.kind !== 'event') return;
+        LumaModal.show(rec, {
+            districtName:   this._lastData?.districtName,
+            parentDistrict: this._lastData?.meta?.parentDistrict
         });
     }
 
@@ -124,6 +147,7 @@ export class SidebarController {
      */
     showLoading(districtName, meta = {}) {
         this._lastData = null;
+        this._lastRecs = null;
         this._setScreen(SidebarController.SCREEN_STATS);
         this._root.classList.add('sidebar--open');
         this._titleEl.textContent = districtName;
@@ -145,6 +169,7 @@ export class SidebarController {
      */
     renderData(data) {
         this._lastData = data;
+        this._lastRecs = null;
         const meta = data.meta ?? {};
         this._setScreen(SidebarController.SCREEN_STATS);
         this._root.classList.add('sidebar--open');
@@ -173,6 +198,7 @@ export class SidebarController {
      */
     showRecommendations(recs) {
         this._setScreen(SidebarController.SCREEN_RECS);
+        this._lastRecs = recs;
         this._bodyEl.innerHTML = RecommendationView.renderRecommendations(recs);
         this._bodyEl.scrollTop = 0;
     }
